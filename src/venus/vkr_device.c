@@ -132,7 +132,8 @@ vkr_dispatch_vkCreateDevice(struct vn_dispatch_context *dispatch,
     * and would fail vkCreateDevice on it
     */
    const bool drop_emulated =
-      physical_dev->is_dma_buf_emulated || !physical_dev->EXT_image_drm_format_modifier;
+      physical_dev->is_dma_buf_emulated || !physical_dev->EXT_image_drm_format_modifier ||
+      !physical_dev->EXT_queue_family_foreign;
 
    /* append extensions for our own use */
    const char **exts = NULL;
@@ -160,6 +161,9 @@ vkr_dispatch_vkCreateDevice(struct vn_dispatch_context *dispatch,
             continue;
          if (!physical_dev->EXT_image_drm_format_modifier &&
              !strcmp(name, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME))
+            continue;
+         if (!physical_dev->EXT_queue_family_foreign &&
+             !strcmp(name, VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME))
             continue;
 
          exts[ext_count++] = name;
