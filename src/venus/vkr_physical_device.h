@@ -28,7 +28,6 @@ struct vkr_physical_device {
    bool EXT_queue_family_foreign;
 
    bool KHR_external_fence_fd;
-   bool KHR_external_semaphore_fd;
 
    bool EXT_external_memory_metal;
    bool EXT_metal_objects;
