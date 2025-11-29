@@ -128,6 +128,12 @@ vkr_dispatch_vkCreateDevice(struct vn_dispatch_context *dispatch,
          return;
    }
 
+   /* the guest may enable what we only emulate; the host has no such extension
+    * and would fail vkCreateDevice on it
+    */
+   const bool drop_emulated =
+      physical_dev->is_dma_buf_emulated || !physical_dev->EXT_image_drm_format_modifier;
+
    /* append extensions for our own use */
    const char **exts = NULL;
    uint32_t ext_count = args->pCreateInfo->enabledExtensionCount;
@@ -137,7 +143,7 @@ vkr_dispatch_vkCreateDevice(struct vn_dispatch_context *dispatch,
    ext_count += physical_dev->KHR_external_memory_fd;
    ext_count += physical_dev->EXT_external_memory_dma_buf;
    ext_count += physical_dev->KHR_external_fence_fd;
-   if (ext_count > args->pCreateInfo->enabledExtensionCount) {
+   if (ext_count > args->pCreateInfo->enabledExtensionCount || drop_emulated) {
       exts = malloc(sizeof(*exts) * ext_count);
       if (!exts) {
          args->ret = VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -148,12 +154,12 @@ vkr_dispatch_vkCreateDevice(struct vn_dispatch_context *dispatch,
       for (uint32_t i = 0; i < args->pCreateInfo->enabledExtensionCount; i++) {
          const char *name = args->pCreateInfo->ppEnabledExtensionNames[i];
 
-         /* the guest may enable what we only emulate; the host has no such
-          * extension and would fail vkCreateDevice on it
-          */
          if (physical_dev->is_dma_buf_emulated &&
              (!strcmp(name, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME) ||
               !strcmp(name, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME)))
+            continue;
+         if (!physical_dev->EXT_image_drm_format_modifier &&
+             !strcmp(name, VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME))
             continue;
 
          exts[ext_count++] = name;
