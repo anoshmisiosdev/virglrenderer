@@ -46,6 +46,10 @@
 #include "vrend/vrend_renderer.h"
 #include "vrend/vrend_winsys.h"
 
+#ifdef ENABLE_METAL
+#include "vrend/vrend_metal.h"
+#endif
+
 #ifndef WIN32
 #include "util/libsync.h"
 #endif
@@ -1513,6 +1517,83 @@ virgl_renderer_resource_import_blob(const struct virgl_renderer_resource_import_
    res->map_size = args->size;
 
    return 0;
+}
+
+enum virgl_renderer_native_handle_type
+virgl_renderer_create_handle_for_scanout(uint32_t res_id,
+                                         uint32_t width,
+                                         uint32_t height,
+                                         uint32_t virgl_format,
+                                         uint32_t padding,
+                                         uint32_t stride,
+                                         uint32_t offset,
+                                         virgl_renderer_native_handle *handle)
+{
+   TRACE_FUNC();
+#ifdef ENABLE_METAL
+   struct virgl_resource *res = virgl_resource_lookup(res_id);
+
+   if (!res)
+      return VIRGL_NATIVE_HANDLE_NONE;
+
+   /*
+    * An in-process (vrend) blob allocated as a native Metal texture
+    * (VIRGL_RES_BIND_SCANOUT, see vrend_resource_metal_init) already
+    * carries a channel-correct MTLTexture; hand out a retained reference.
+    */
+   if (res->pipe_resource) {
+      MTLTexture_id tex =
+         vrend_renderer_resource_metal_texture(res->pipe_resource);
+      if (tex) {
+         *handle = virgl_metal_retain_texture(tex);
+         return VIRGL_NATIVE_HANDLE_METAL_TEXTURE;
+      }
+   }
+
+#ifdef HAVE_EPOXY_EGL_H
+   /*
+    * A cross-process resource (created by a Neptune or Venus context in
+    * the render server) is backed by a mmap()-able shared-memory segment;
+    * wrap the FD as an MTLBuffer and create a linear texture over it with
+    * the caller-provided layout.  Only the in-process (EGL/ANGLE) build
+    * displays scanouts; render-server builds have no EGL device.
+    */
+   if (res->fd_type == VIRGL_RESOURCE_FD_SHM) {
+      struct vrend_metal_texture_description desc = {
+         .width = width,
+         .height = height,
+         .stride = stride,
+         .offset = offset,
+         .usage = PIPE_USAGE_IMMUTABLE,
+         .format = virgl_format,
+      };
+      MTLTexture_id tex;
+
+      if (virgl_egl_metal_create_texture_from_shm(egl, res->fd,
+                                                  res->map_size,
+                                                  &desc, &tex)) {
+         *handle = tex;
+         return VIRGL_NATIVE_HANDLE_METAL_TEXTURE;
+      }
+   }
+#endif /* HAVE_EPOXY_EGL_H */
+
+   return VIRGL_NATIVE_HANDLE_NONE;
+#else /* !ENABLE_METAL */
+   return VIRGL_NATIVE_HANDLE_NONE;
+#endif
+}
+
+void
+virgl_renderer_release_handle_for_scanout(enum virgl_renderer_native_handle_type type,
+                                          virgl_renderer_native_handle handle)
+{
+   TRACE_FUNC();
+#ifdef ENABLE_METAL
+   if (type == VIRGL_NATIVE_HANDLE_METAL_TEXTURE) {
+      virgl_metal_release_texture(handle);
+   }
+#endif
 }
 
 int
