@@ -173,6 +173,13 @@ bool virgl_metal_create_texture_from_shm(MTLDevice_id device,
    return !!*tex;
 }
 
+MTLTexture_id virgl_metal_retain_texture(MTLTexture_id tex)
+{
+   id<MTLTexture> mtl_texture = (id<MTLTexture>)tex;
+
+   return [mtl_texture retain];
+}
+
 void virgl_metal_release_texture(MTLTexture_id tex)
 {
    id<MTLTexture> mtl_texture = (id<MTLTexture>)tex;

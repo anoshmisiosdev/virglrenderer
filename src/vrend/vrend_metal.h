@@ -39,6 +39,8 @@ bool virgl_metal_create_texture_from_shm(MTLDevice_id device,
                                          const struct vrend_metal_texture_description *desc,
                                          MTLTexture_id *tex);
 
+MTLTexture_id virgl_metal_retain_texture(MTLTexture_id tex);
+
 void virgl_metal_release_texture(MTLTexture_id tex);
 
 #endif
