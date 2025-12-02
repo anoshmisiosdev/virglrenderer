@@ -313,12 +313,15 @@ vkr_physical_device_init_extensions(struct vkr_physical_device *physical_dev)
    uint32_t emulated_count = 0;
    physical_dev->is_dma_buf_emulated =
       !physical_dev->EXT_external_memory_dma_buf && physical_dev->EXT_external_memory_metal;
-   emulated_count += physical_dev->is_dma_buf_emulated;
+   emulated_count += 2 * physical_dev->is_dma_buf_emulated;
    emulated_count += !physical_dev->EXT_image_drm_format_modifier;
    emulated_count += !physical_dev->EXT_queue_family_foreign;
    exts = realloc(exts, sizeof(*exts) * (advertised_count + emulated_count));
    if (physical_dev->is_dma_buf_emulated) {
       strcpy(prop.extensionName, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
+      prop.specVersion = vkr_extension_get_spec_version(prop.extensionName);
+      exts[advertised_count++] = prop;
+      strcpy(prop.extensionName, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
       prop.specVersion = vkr_extension_get_spec_version(prop.extensionName);
       exts[advertised_count++] = prop;
    }
@@ -346,35 +349,6 @@ vkr_physical_device_init_extensions(struct vkr_physical_device *physical_dev)
 
       if (!(fence_props.externalFenceFeatures & VK_EXTERNAL_FENCE_FEATURE_EXPORTABLE_BIT))
          physical_dev->KHR_external_fence_fd = false;
-   }
-
-   /* On macOS, VK_KHR_external_memory_fd is emulated via Metal shared memory.
-    * MoltenVK doesn't natively support it, but virglrenderer implements
-    * fd-based memory export using Metal buffers backed by POSIX SHM.
-    *
-    * Inject it into the advertised list so the guest Venus driver accepts
-    * the physical device (it's a hard requirement in vn_physical_device.c).
-    * The guest never enables it in vkCreateDevice — Mesa's Venus driver
-    * uses the advertised flag for capability detection only.
-    *
-    * Do NOT mark physical_dev->KHR_external_memory_fd = true here — that
-    * flag tracks native MoltenVK support and gates the host-side
-    * vkCreateDevice extension list (MoltenVK rejects it with -7).
-    *
-    * TODO: Remove after mesa!40478 has had sufficient distro uptake.
-    */
-   if (physical_dev->EXT_external_memory_metal && !physical_dev->KHR_external_memory_fd) {
-      VkExtensionProperties *new_exts =
-         realloc(exts, sizeof(*exts) * (advertised_count + 1));
-      if (new_exts) {
-         exts = new_exts;
-         strcpy(new_exts[advertised_count].extensionName,
-                VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
-         new_exts[advertised_count].specVersion = 0;
-         advertised_count++;
-      } else {
-         vkr_log("failed to inject VK_KHR_external_memory_fd");
-      }
    }
 
    physical_dev->extensions = realloc(exts, sizeof(*exts) * advertised_count);
