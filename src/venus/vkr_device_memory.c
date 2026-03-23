@@ -313,6 +313,18 @@ vkr_dispatch_vkAllocateMemory(struct vn_dispatch_context *dispatch,
                                     might_export);
 
    if (force_metal_import) {
+      if (export_info) {
+         /* Strip export info since valid_fd_types can only be shm here.  The
+          * guest asks for a dma_buf export when dma_buf is emulated, which
+          * the host can neither honour nor be shown.
+          */
+         VkBaseInStructure *prev_of_export_info = vkr_find_prev_struct(
+            alloc_info, VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO);
+
+         prev_of_export_info->pNext = export_info->pNext;
+         export_info = NULL;
+      }
+
       /* Allocate shm and wrap as a MTLBuffer for import. */
       mtl_shm = vkr_mtl_shm_alloc(dev->mtl_device, alloc_info->allocationSize);
       if (!mtl_shm) {
