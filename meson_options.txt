@@ -72,6 +72,24 @@ option(
 )
 
 option(
+  'neptune-mode',
+  type : 'combo',
+  value : 'full',
+  choices : ['full', 'client', 'server'],
+  description : 'how the neptune build is split between library and render ' +
+                'server. "full" (default) compiles the D3DMetal renderer ' +
+                'backend into the library and builds an in-tree render ' +
+                'server (single architecture). "client" builds a proxy-only ' +
+                'library that speaks the render-server protocol and ' +
+                'advertises the capset but does not link the backend, so ' +
+                'libvirglrenderer can be built natively (e.g. arm64) while ' +
+                'rendering is offloaded to an out-of-tree render server. ' +
+                '"server" builds only the render server (with the backend) ' +
+                'and does not install the public library, so an x86_64 ' +
+                'server can sit next to a native client-mode library.'
+)
+
+option(
   'check-gl-errors',
   type : 'boolean',
   value : true,

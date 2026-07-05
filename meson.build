@@ -352,10 +352,30 @@ endif
 
 with_venus = get_option('venus')
 with_neptune = get_option('neptune')
+
+# Neptune can be built in three shapes (see meson_options.txt):
+#   full   - renderer backend compiled into the library, plus an in-tree
+#            render server (single architecture; the default).
+#   client - proxy-only front-end: the library speaks the render-server
+#            protocol and advertises the capset, but does not link the
+#            renderer backend.  This lets libvirglrenderer be built
+#            natively (e.g. arm64) while rendering is offloaded to an
+#            out-of-tree x86_64 render server.
+#   server - only the render server back-end; the public library is not
+#            installed, so an x86_64 server can sit alongside a native
+#            client-mode library.
+neptune_mode = get_option('neptune-mode')
+with_neptune_backend = with_neptune and neptune_mode != 'client'
+neptune_server_only = with_neptune and neptune_mode == 'server'
+
 with_render_server = ''
 if with_venus or with_neptune
    with_render_server = get_option('render-server-mode')
 endif
+# The render server executable hosts an in-process renderer backend, so it
+# is built only when one is compiled here: venus, or neptune outside the
+# proxy-only client mode.
+build_render_server = with_venus or with_neptune_backend
 with_render_server_worker = get_option('render-server-worker')
 if with_render_server_worker == 'auto'
    with_render_server_worker = with_render_server
@@ -393,19 +413,30 @@ if with_venus
    endif
 endif
 
+# ENABLE_NEPTUNE marks neptune capset/proxy support (present in client mode
+# too); ENABLE_NEPTUNE_BACKEND marks the renderer backend, which the render
+# server dispatches to.  A client-mode build has the former but not the
+# latter, so a venus server built in the same tree links without the neptune
+# backend.
 if with_neptune
    conf_data.set('ENABLE_NEPTUNE', 1)
+endif
+if with_neptune_backend
+   conf_data.set('ENABLE_NEPTUNE_BACKEND', 1)
 endif
 
 # d3dmetal-native hosts Apple's D3DMetal.framework on darwin neptune
 # builds: it exports the D3D11/DXGI/D3D12 entry points the renderer
 # dlopens, plus the dmn_* embedder API (events, shared-resource
-# descriptors) the neptune glue links against.  D3DMetal ships x86_64-only, so the
-# whole render server process must be x86_64.
-if with_neptune and with_host_darwin
+# descriptors) the neptune glue links against.  D3DMetal ships
+# x86_64-only, so any build that compiles the backend must be x86_64.
+# A client-mode build links no backend, so it is exempt and may be
+# built natively (arm64).
+if with_neptune_backend and with_host_darwin
    if host_machine.cpu_family() != 'x86_64'
       error('neptune on darwin requires an x86_64 build: ' +
-            'D3DMetal.framework (hosted by d3dmetal-native) is x86_64-only.')
+            'D3DMetal.framework (hosted by d3dmetal-native) is x86_64-only. ' +
+            'Use -Dneptune-mode=client for a native proxy-only library.')
    endif
    d3dmetal_native_dep = dependency('d3dmetal-native')
    d3dmetal_native_libdir = d3dmetal_native_dep.get_variable(
@@ -492,11 +523,14 @@ if with_unstable_apis
 endif
 
 subdir('src')
-if not with_host_windows
+# A server-only build ships just the render server; vtest is a separate
+# standalone tool and would only collide with a client-mode build sharing
+# the same prefix.
+if not with_host_windows and not neptune_server_only
    subdir('vtest')
 endif
 
-if with_render_server == 'process'
+if build_render_server and with_render_server == 'process'
 subdir('server')
 endif
 
@@ -517,6 +551,7 @@ summary({'c_args': (' ').join(get_option('c_args')),
         'metal': metal_dep.found(),
         'venus': with_venus,
         'neptune': with_neptune,
+        'neptune-mode': with_neptune ? neptune_mode : 'n/a',
         'drm-amdgpu': with_drm_amdgpu,
         'drm-asahi': with_drm_asahi,
         'drm-i915': with_drm_i915,

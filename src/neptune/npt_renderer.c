@@ -6,8 +6,6 @@
 #include "npt_common.h"
 
 #include "drm-uapi/virtgpu_drm.h"
-#include "neptune-protocol/npt_protocol_defs.h"
-#include "neptune_hw.h"
 #include "npt_context.h"
 #include "npt_library.h"
 #include "npt_profile.h"
@@ -22,17 +20,8 @@ struct npt_renderer_state {
 
 static struct npt_renderer_state npt_state;
 
-size_t
-npt_get_capset(void *capset, UNUSED uint32_t flags)
-{
-   struct virgl_renderer_capset_neptune *c = capset;
-   if (c) {
-      memset(c, 0, sizeof(*c));
-      c->wire_format_version = NPT_PROTOCOL_WIRE_VERSION;
-   }
-
-   return sizeof(struct virgl_renderer_capset_neptune);
-}
+/* npt_get_capset() lives in npt_capset.c so proxy-only client builds can
+ * advertise the capset without linking the renderer backend. */
 
 bool
 npt_renderer_init(UNUSED uint32_t flags, const struct npt_renderer_callbacks *cbs)
