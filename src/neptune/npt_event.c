@@ -16,6 +16,9 @@
 #if defined(__linux__)
 #include <sys/eventfd.h>
 #endif
+#if defined(__APPLE__)
+#include <d3dmetal_native.h>
+#endif
 
 static int
 event_fd_create(struct npt_event_fd *out)
@@ -23,12 +26,17 @@ event_fd_create(struct npt_event_fd *out)
 #if defined(__linux__)
    out->fd = eventfd(0, EFD_CLOEXEC);
    return out->fd < 0 ? -1 : 0;
+#elif defined(__APPLE__)
+   /* Manual-reset matches Win32's default for guest-created HANDLEs
+    * (we don't auto-clear on read). */
+   out->handle = dmn_event_create(/*manual_reset=*/1, /*initial_state=*/0);
+   return out->handle ? 0 : -1;
 #else
-   /* Prefer pipe2(O_CLOEXEC) to avoid the fd-leak window between
-    * pipe() and fcntl().  Fall back to pipe() + fcntl() when pipe2
-    * isn't available (ENOSYS). */
+   /* Prefer pipe2(O_CLOEXEC) where available (Linux, FreeBSD) to
+    * avoid the fd-leak window between pipe() and fcntl().  Fall back
+    * to pipe() + fcntl() on platforms without pipe2. */
    int fds[2];
-#if defined(O_CLOEXEC)
+#ifdef HAVE_PIPE2
    if (pipe2(fds, O_CLOEXEC) == 0) {
       out->read_fd = fds[0];
       out->write_fd = fds[1];
@@ -59,6 +67,11 @@ event_fd_destroy(struct npt_event_fd *fd)
       close(fd->fd);
       fd->fd = -1;
    }
+#elif defined(__APPLE__)
+   if (fd->handle) {
+      dmn_event_close(fd->handle);
+      fd->handle = NULL;
+   }
 #else
    if (fd->read_fd >= 0) {
       close(fd->read_fd);
@@ -71,14 +84,18 @@ event_fd_destroy(struct npt_event_fd *fd)
 #endif
 }
 
-/* The fd handed to the host as the HANDLE; SetEvent writes to it. */
-static int
-event_fd_signal_fd(const struct npt_event_fd *fd)
+/* The value handed to the host as the HANDLE; SetEvent acts on it.
+ * An fd cast to a pointer on eventfd/pipe platforms, the d3dmetal-
+ * native event handle on darwin. */
+static void *
+event_fd_signal_handle(const struct npt_event_fd *fd)
 {
 #if defined(__linux__)
-   return fd->fd;
+   return fd->fd >= 0 ? (void *)(uintptr_t)fd->fd : NULL;
+#elif defined(__APPLE__)
+   return fd->handle;
 #else
-   return fd->write_fd;
+   return fd->write_fd >= 0 ? (void *)(uintptr_t)fd->write_fd : NULL;
 #endif
 }
 
@@ -88,6 +105,8 @@ event_fd_dup_wait_fd(const struct npt_event_fd *fd)
 {
 #if defined(__linux__)
    return dup(fd->fd);
+#elif defined(__APPLE__)
+   return dmn_event_dup_fd(fd->handle);
 #else
    return dup(fd->read_fd);
 #endif
@@ -98,6 +117,8 @@ event_fd_init_invalid(struct npt_event_fd *fd)
 {
 #if defined(__linux__)
    fd->fd = -1;
+#elif defined(__APPLE__)
+   fd->handle = NULL;
 #else
    fd->read_fd = -1;
    fd->write_fd = -1;
@@ -361,11 +382,7 @@ npt_event_lookup(struct npt_context *ctx, uint64_t token)
 
    mtx_lock(&ctx->event_mutex);
    struct npt_event_proxy *pr = lookup_locked(ctx, token);
-   void *ret = NULL;
-   if (pr) {
-      int sig_fd = event_fd_signal_fd(&pr->proxy);
-      ret = sig_fd >= 0 ? (void *)(uintptr_t)sig_fd : NULL;
-   }
+   void *ret = pr ? event_fd_signal_handle(&pr->proxy) : NULL;
    mtx_unlock(&ctx->event_mutex);
    return ret;
 }

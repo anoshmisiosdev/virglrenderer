@@ -24,10 +24,22 @@ if with_tracing == 'percetto'
    virgl_render_server_depends += [percetto_dep]
 endif
 
+virgl_render_server_rpaths = []
+if with_neptune and with_host_darwin
+   # When libd3dmetal-native.dylib's install name is @rpath-relative,
+   # its load (via libvirglrenderer) resolves against the whole load
+   # chain's rpath stack; contribute the libdir from the executable
+   # too so relocated installs keep working.
+   if d3dmetal_native_libdir != ''
+      virgl_render_server_rpaths += d3dmetal_native_libdir
+   endif
+endif
+
 virgl_render_server = executable(
    'virgl_render_server',
    virgl_render_server_sources,
    dependencies : virgl_render_server_depends,
+   install_rpath : ':'.join(virgl_render_server_rpaths),
    install : true,
    install_dir : render_server_install_dir,
 )

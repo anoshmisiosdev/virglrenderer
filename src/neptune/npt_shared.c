@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: MIT
  *
  * D3D11 shared / presentable textures over virtio-gpu blob resources.
- * See npt_shared.h for the model.
+ * See npt_shared.h for the model.  The COM flow (GetSharedHandle /
+ * OpenSharedResource) is platform-neutral; only the descriptor behind
+ * the HANDLE differs: dxvk's DxvkSharedTextureDescriptor (dmabuf) on
+ * Linux, d3dmetal-native's dmn_shared_texture_handle (shm fd) on macOS.
  */
 
 #include "npt_shared.h"
@@ -12,7 +15,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <d3dmetal_native.h>
+#else
 #include <dxvk_shared_resource.h>
+#endif
 
 #include "c11/threads.h"
 
@@ -74,6 +81,33 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
       return NPT_FAILED(hr) ? hr : NPT_E_FAIL;
    }
 
+   struct npt_blob_export_info info;
+   memset(&info, 0, sizeof(info));
+
+#ifdef __APPLE__
+   const dmn_shared_texture_handle *desc =
+      (const dmn_shared_texture_handle *)(uintptr_t)handle;
+   if (desc->magic != DMN_SHARED_TEXTURE_MAGIC ||
+       desc->version != DMN_SHARED_HANDLE_VERSION || desc->fd < 0) {
+      npt_log("shared: export: blob_id %" PRIu64 " bad descriptor", blob_id);
+      return NPT_E_FAIL;
+   }
+
+   if (!(desc->bind_flags & NPT_D3D11_BIND_SHADER_RESOURCE))
+      npt_log("shared: export: blob_id %" PRIu64 " texture lacks "
+              "SHADER_RESOURCE bind (0x%x); consumers cannot sample it",
+              blob_id, desc->bind_flags);
+
+   /* d3dmetal-native shared textures are always one linear plane of
+    * shared memory; modifier/texture_layout have no meaning here. */
+   info.allocation_size = desc->size;
+   info.plane_count = 1;
+   info.planes[0].offset = 0;
+   info.planes[0].pitch = desc->stride;
+
+   const int export_fd = desc->fd;
+   const uint64_t export_size = desc->size;
+#else
    const struct DxvkSharedTextureDescriptor *desc =
       (const struct DxvkSharedTextureDescriptor *)(uintptr_t)handle;
    if (desc->magic != DXVK_SHARED_DESCRIPTOR_TEXTURE ||
@@ -89,16 +123,6 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
               "SHADER_RESOURCE bind (0x%x); consumers cannot sample it",
               blob_id, desc->meta.BindFlags);
 
-   /* Publish the dmabuf-level facts into the exporter's shmem window. */
-   struct npt_resource *data_res = npt_context_get_resource(ctx, data_res_id);
-   if (!data_res || data_res->fd_type != VIRGL_RESOURCE_FD_SHM ||
-       !data_res->u.data) {
-      npt_log("shared: export: data resource %u not found", data_res_id);
-      return NPT_E_INVALIDARG;
-   }
-
-   struct npt_blob_export_info info;
-   memset(&info, 0, sizeof(info));
    info.modifier = desc->drmFormatModifier;
    info.allocation_size = desc->allocationSize;
    info.plane_count = desc->planeCount;
@@ -106,6 +130,18 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
    for (uint32_t i = 0; i < desc->planeCount; i++) {
       info.planes[i].offset = desc->planes[i].offset;
       info.planes[i].pitch = desc->planes[i].pitch;
+   }
+
+   const int export_fd = desc->fd;
+   const uint64_t export_size = desc->allocationSize;
+#endif
+
+   /* Publish the export-level facts into the exporter's shmem window. */
+   struct npt_resource *data_res = npt_context_get_resource(ctx, data_res_id);
+   if (!data_res || data_res->fd_type != VIRGL_RESOURCE_FD_SHM ||
+       !data_res->u.data) {
+      npt_log("shared: export: data resource %u not found", data_res_id);
+      return NPT_E_INVALIDARG;
    }
 
    /* data_off is guest-supplied: bound the write to the mapping. */
@@ -119,22 +155,28 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
    /* Stage the pending blob the guest KMD claims via
     * RESOURCE_CREATE_BLOB(HOST3D, blob_id).  The table takes fd
     * ownership; the texture keeps its own. */
-   int fd = dup(desc->fd);
+   int fd = dup(export_fd);
    if (fd < 0) {
       npt_log("shared: export: blob_id %" PRIu64 " dup failed", blob_id);
       return NPT_E_FAIL;
    }
    if (!npt_context_register_pending_blob(ctx, blob_id,
-                                          VIRGL_RESOURCE_FD_DMABUF, fd,
-                                          desc->allocationSize)) {
+                                          NPT_SHARED_FD_TYPE, fd,
+                                          export_size)) {
       close(fd);
       return NPT_E_FAIL;
    }
 
+#ifdef __APPLE__
+   npt_log("shared: exported blob_id=%" PRIu64 " %ux%u fmt=%u pitch=%" PRIu64
+           " (ctx %u)", blob_id, desc->width, desc->height, desc->dxgi_format,
+           desc->stride, ctx->ctx_id);
+#else
    npt_log("shared: exported blob_id=%" PRIu64 " %ux%u fmt=%u mod=0x%016"
            PRIx64 " pitch=%" PRIu64 " (ctx %u)", blob_id, desc->meta.Width,
            desc->meta.Height, desc->meta.Format, desc->drmFormatModifier,
            desc->planes[0].pitch, ctx->ctx_id);
+#endif
    return NPT_S_OK;
 }
 
@@ -165,13 +207,32 @@ npt_shared_open_res(struct npt_context *ctx, uint64_t device_id,
       thrd_sleep(&(struct timespec){
                     .tv_nsec = NPT_SHARED_ATTACH_POLL_MS * 1000000L }, NULL);
    }
-   if (!res || res->fd_type != VIRGL_RESOURCE_FD_DMABUF || res->u.fd < 0) {
+   if (!res || res->fd_type != NPT_SHARED_FD_TYPE || res->u.fd < 0) {
       npt_log("shared: open: res_id %u not attached (found=%d type=%d)",
               cmd->res_id, res != NULL, res ? (int)res->fd_type : -1);
       return NPT_E_INVALIDARG;
    }
 
    /* Rebuild the exporter's descriptor around our own fd reference. */
+#ifdef __APPLE__
+   dmn_shared_texture_handle desc;
+   memset(&desc, 0, sizeof(desc));
+   desc.magic = DMN_SHARED_TEXTURE_MAGIC;
+   desc.version = DMN_SHARED_HANDLE_VERSION;
+   desc.width = cmd->width;
+   desc.height = cmd->height;
+   desc.dxgi_format = cmd->format;
+   desc.mip_levels = cmd->mip_levels;
+   desc.array_size = cmd->array_size;
+   desc.sample_count = cmd->sample_count;
+   desc.bind_flags = cmd->bind_flags;
+   desc.misc_flags = cmd->misc_flags;
+   desc.cpu_access = cmd->cpu_access_flags;
+   /* One linear plane of shared memory; usage/layout/modifier from the
+    * wire have no d3dmetal-native equivalent. */
+   desc.stride = cmd->export_info.planes[0].pitch;
+   desc.size = cmd->export_info.allocation_size;
+#else
    struct DxvkSharedTextureDescriptor desc;
    memset(&desc, 0, sizeof(desc));
    desc.magic = DXVK_SHARED_DESCRIPTOR_TEXTURE;
@@ -196,6 +257,7 @@ npt_shared_open_res(struct npt_context *ctx, uint64_t device_id,
       desc.planes[i].pitch = cmd->export_info.planes[i].pitch;
    }
    desc.allocationSize = cmd->export_info.allocation_size;
+#endif
 
    /* The import dup()s the fd internally; hold our own reference so a
     * concurrent resource destroy can't invalidate res->u.fd mid-call. */

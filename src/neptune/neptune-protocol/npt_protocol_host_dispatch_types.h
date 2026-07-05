@@ -1641,18 +1641,18 @@ typedef void (NPT_STDMETHODCALLTYPE *PFN_ID3D12GraphicsCommandList10_DispatchGra
 /* Top-level function pointer typedefs                                 */
 /* ================================================================== */
 
-typedef HRESULT (*PFN_CreateDXGIFactory)(const IID *, void **);
-typedef HRESULT (*PFN_CreateDXGIFactory1)(const IID *, void **);
-typedef HRESULT (*PFN_CreateDXGIFactory2)(UINT, const IID *, void **);
-typedef HRESULT (*PFN_DXGIDeclareAdapterRemovalSupport)(void);
-typedef HRESULT (*PFN_D3D11CreateDevice)(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL *, UINT, UINT, ID3D11Device **, D3D_FEATURE_LEVEL *, ID3D11DeviceContext **);
-typedef HRESULT (*PFN_D3D11CreateDeviceAndSwapChain)(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL *, UINT, UINT, const DXGI_SWAP_CHAIN_DESC *, IDXGISwapChain **, ID3D11Device **, D3D_FEATURE_LEVEL *, ID3D11DeviceContext **);
-typedef HRESULT (*PFN_D3D11On12CreateDevice)(IUnknown *, UINT, const D3D_FEATURE_LEVEL *, UINT, const IUnknown **, UINT, UINT, ID3D11Device **, ID3D11DeviceContext **, D3D_FEATURE_LEVEL *);
-typedef HRESULT (*PFN_D3D12CreateDevice)(IUnknown *, D3D_FEATURE_LEVEL, const IID *, void **);
-typedef HRESULT (*PFN_D3D12CreateRootSignatureDeserializer)(const VOID *, SIZE_T, const IID *, void **);
-typedef HRESULT (*PFN_D3D12CreateVersionedRootSignatureDeserializer)(const VOID *, SIZE_T, const IID *, void **);
-typedef HRESULT (*PFN_D3D12SerializeRootSignature)(const D3D12_ROOT_SIGNATURE_DESC *, D3D_ROOT_SIGNATURE_VERSION, ID3DBlob **, ID3DBlob **);
-typedef HRESULT (*PFN_D3D12SerializeVersionedRootSignature)(const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *, ID3DBlob **, ID3DBlob **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_CreateDXGIFactory)(const IID *, void **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_CreateDXGIFactory1)(const IID *, void **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_CreateDXGIFactory2)(UINT, const IID *, void **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_DXGIDeclareAdapterRemovalSupport)(void);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D11CreateDevice)(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL *, UINT, UINT, ID3D11Device **, D3D_FEATURE_LEVEL *, ID3D11DeviceContext **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D11CreateDeviceAndSwapChain)(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT, const D3D_FEATURE_LEVEL *, UINT, UINT, const DXGI_SWAP_CHAIN_DESC *, IDXGISwapChain **, ID3D11Device **, D3D_FEATURE_LEVEL *, ID3D11DeviceContext **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D11On12CreateDevice)(IUnknown *, UINT, const D3D_FEATURE_LEVEL *, UINT, const IUnknown **, UINT, UINT, ID3D11Device **, ID3D11DeviceContext **, D3D_FEATURE_LEVEL *);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D12CreateDevice)(IUnknown *, D3D_FEATURE_LEVEL, const IID *, void **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D12CreateRootSignatureDeserializer)(const VOID *, SIZE_T, const IID *, void **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D12CreateVersionedRootSignatureDeserializer)(const VOID *, SIZE_T, const IID *, void **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D12SerializeRootSignature)(const D3D12_ROOT_SIGNATURE_DESC *, D3D_ROOT_SIGNATURE_VERSION, ID3DBlob **, ID3DBlob **);
+typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_D3D12SerializeVersionedRootSignature)(const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *, ID3DBlob **, ID3DBlob **);
 
 /* ================================================================== */
 /* Per-interface dispatch overrides structs                            */

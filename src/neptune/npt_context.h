@@ -47,9 +47,14 @@ struct npt_resource {
    enum virgl_resource_fd_type fd_type;
    bool iov_owned; /* data borrowed from IOV: don't munmap */
 
-   union {
-      int fd;          /* dma_buf / opaque */
-      uint8_t *data;   /* shm */
+   /* A struct, not a union: an imported shm resource keeps BOTH its
+    * mapping (ring/feedback/transfer windows read data) and its fd
+    * (on hosts where shared textures ride shm, SHARED_OPEN_RES hands
+    * the fd back to the D3D library).  fd is -1 when absent (e.g.
+    * iov-backed guest storage). */
+   struct {
+      int fd;          /* dma_buf / opaque / shm export */
+      uint8_t *data;   /* shm mapping */
    } u;
 
    size_t size;

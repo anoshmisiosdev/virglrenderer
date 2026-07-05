@@ -65,6 +65,8 @@ npt_resource_free(struct npt_resource *res)
    case VIRGL_RESOURCE_FD_SHM:
       if (res->u.data && !res->iov_owned)
          munmap(res->u.data, res->size);
+      if (res->u.fd >= 0)
+         close(res->u.fd);
       break;
    case VIRGL_RESOURCE_FD_DMABUF:
    case VIRGL_RESOURCE_FD_OPAQUE:
@@ -873,6 +875,7 @@ npt_context_create_resource(struct npt_context *ctx,
       res->fd_type = VIRGL_RESOURCE_FD_SHM;
       res->size = blob_size;
       res->u.data = data;
+      res->u.fd = -1; /* fd ownership leaves via out_blob */
 
       mtx_lock(&ctx->resource_mutex);
       if (_mesa_hash_table_search(ctx->resource_table, &res->res_id)) {
@@ -911,7 +914,7 @@ npt_context_create_resource(struct npt_context *ctx,
        * context SHARED_OPEN_RES on this res_id resolves without an
        * attach round-trip (attach is deduped for the creating
        * context).  The table owns its own dup. */
-      if (pb->fd_type == VIRGL_RESOURCE_FD_DMABUF) {
+      if (pb->fd_type == NPT_SHARED_FD_TYPE) {
          int table_fd = dup(pb->fd);
          if (table_fd >= 0 &&
              !npt_context_import_resource(ctx, res_id, pb->fd_type,
@@ -996,12 +999,10 @@ npt_context_import_resource(struct npt_context *ctx,
       return false;
    }
 
-   if (fd_type == VIRGL_RESOURCE_FD_SHM) {
-      /* The mmap took the only ref we need; drop the caller's fd. */
-      close(fd);
-   } else {
-      res->u.fd = fd; /* take ownership */
-   }
+   /* Take fd ownership.  For shm the mapping serves the data windows,
+    * but the fd is kept as well: on hosts where shared textures ride
+    * shm, SHARED_OPEN_RES re-exports it to the D3D library. */
+   res->u.fd = fd;
    _mesa_hash_table_insert(ctx->resource_table, &res->res_id, res);
    mtx_unlock(&ctx->resource_mutex);
 
