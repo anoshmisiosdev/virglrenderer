@@ -246,7 +246,7 @@ foreach a : supported_function_attributes
   endif
 endforeach
 
-foreach f : ['memfd_create', 'strtok_r', 'timespec_get']
+foreach f : ['memfd_create', 'pipe2', 'strtok_r', 'timespec_get']
   if cc.has_function(f)
     conf_data.set('HAVE_@0@'.format(f.to_upper()), 1)
   endif
@@ -389,6 +389,21 @@ endif
 
 if with_neptune
    conf_data.set('ENABLE_NEPTUNE', 1)
+endif
+
+# d3dmetal-native hosts Apple's D3DMetal.framework on darwin neptune
+# builds: it exports the D3D11/DXGI/D3D12 entry points the renderer
+# dlopens, plus the dmn_* embedder API (events, shared-resource
+# descriptors) the neptune glue links against.  D3DMetal ships x86_64-only, so the
+# whole render server process must be x86_64.
+if with_neptune and with_host_darwin
+   if host_machine.cpu_family() != 'x86_64'
+      error('neptune on darwin requires an x86_64 build: ' +
+            'D3DMetal.framework (hosted by d3dmetal-native) is x86_64-only.')
+   endif
+   d3dmetal_native_dep = dependency('d3dmetal-native')
+   d3dmetal_native_libdir = d3dmetal_native_dep.get_variable(
+      pkgconfig : 'libdir', default_value : '')
 endif
 
 if with_render_server

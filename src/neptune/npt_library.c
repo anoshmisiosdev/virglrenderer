@@ -12,10 +12,20 @@
 #include <dlfcn.h>
 #endif
 
-/* Defaults; override via NPT_*_LIBRARY_PATH env vars. */
+/* Defaults; override via NPT_*_LIBRARY_PATH env vars.
+ *
+ * On darwin all three host entry points live in libd3dmetal-native,
+ * which the renderer already links for the dmn_* glue, so dlopen
+ * resolves to the loaded image and the three slots alias one another. */
+#ifdef __APPLE__
+#define NPT_D3D11_LIBRARY_DEFAULT "libd3dmetal-native.dylib"
+#define NPT_DXGI_LIBRARY_DEFAULT  "libd3dmetal-native.dylib"
+#define NPT_D3D12_LIBRARY_DEFAULT "libd3dmetal-native.dylib"
+#else
 #define NPT_D3D11_LIBRARY_DEFAULT "libd3d11.so"
 #define NPT_DXGI_LIBRARY_DEFAULT  "libdxgi.so"
 #define NPT_D3D12_LIBRARY_DEFAULT "libvkd3d-proton-d3d12.so"
+#endif
 
 #ifdef HAVE_DLFCN_H
 
@@ -60,9 +70,11 @@ npt_library_init(struct npt_d3d_library *lib)
    memset(lib, 0, sizeof(*lib));
 
 #ifdef HAVE_DLFCN_H
+#ifndef __APPLE__
    /* Headless operation requires the host D3D11/DXGI library's
     * headless WSI backend. */
    setenv("DXVK_WSI_DRIVER", "Headless", 0);
+#endif
 
    lib->d3d11_module = npt_library_open("NPT_D3D11_LIBRARY_PATH",
                                          NPT_D3D11_LIBRARY_DEFAULT);

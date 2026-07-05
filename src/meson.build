@@ -238,17 +238,24 @@ endif
 
 if with_neptune
    virgl_sources += neptune_sources
-   # Headers only -- Neptune dlopens the d3d11/dxgi libraries at runtime,
-   # so the renderer must not gain a NEEDED entry on libdxvk_*.
-   dxvk_dep = dependency('dxvk-dxgi').partial_dependency(
-      compile_args : true, includes : true)
-   # The shared-resource descriptor contract is a fork-only extension;
-   # bail early rather than fail to compile a Neptune source file.
-   if not cc.has_header('dxvk_shared_resource.h', dependencies : dxvk_dep)
-      error('Neptune requires the dxvk with shared-resource descriptors; ' +
-            'dxvk_shared_resource.h not found via dxvk-dxgi pkg-config.')
+   if with_host_darwin
+      # macOS shares textures through d3dmetal-native's shared-resource
+      # descriptors (the dxvk contract is Linux-only) and links it as a
+      # real dependency for the dmn_* embedder API.
+      virgl_depends += [d3dmetal_native_dep]
+   else
+      # Headers only -- Neptune dlopens the d3d11/dxgi libraries at runtime,
+      # so the renderer must not gain a NEEDED entry on libdxvk_*.
+      dxvk_dep = dependency('dxvk-dxgi').partial_dependency(
+         compile_args : true, includes : true)
+      # The shared-resource descriptor contract is a fork-only extension;
+      # bail early rather than fail to compile a Neptune source file.
+      if not cc.has_header('dxvk_shared_resource.h', dependencies : dxvk_dep)
+         error('Neptune requires the dxvk with shared-resource descriptors; ' +
+               'dxvk_shared_resource.h not found via dxvk-dxgi pkg-config.')
+      endif
+      virgl_depends += [dxvk_dep]
    endif
-   virgl_depends += [dxvk_dep]
 endif
 
 if with_drm_renderers
