@@ -25,7 +25,7 @@ if with_tracing == 'percetto'
 endif
 
 virgl_render_server_rpaths = []
-if with_neptune and with_host_darwin
+if with_neptune_backend and with_host_darwin
    # When libd3dmetal-native.dylib's install name is @rpath-relative,
    # its load (via libvirglrenderer) resolves against the whole load
    # chain's rpath stack; contribute the libdir from the executable

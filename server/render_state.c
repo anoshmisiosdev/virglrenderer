@@ -19,7 +19,7 @@
 #include "vkr_renderer.h"
 #endif
 
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
 #include "npt_renderer.h"
 #endif
 
@@ -127,7 +127,7 @@ static const struct vkr_renderer_callbacks render_state_vkr_cbs = {
 };
 #endif
 
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
 static const struct npt_renderer_callbacks render_state_npt_cbs = {
    .debug_logger = render_state_cb_debug_logger,
    .retire_fence = render_state_cb_retire_fence,
@@ -158,7 +158,7 @@ render_state_fini(void)
 #ifdef ENABLE_VENUS
          vkr_renderer_fini();
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
          npt_renderer_fini();
 #endif
          virgl_fence_table_cleanup();
@@ -177,7 +177,7 @@ render_state_init(uint32_t init_flags)
 #else
    bool want_venus = false;
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
    bool want_neptune = !!(init_flags & VIRGL_RENDERER_NEPTUNE);
 #else
    bool want_neptune = false;
@@ -201,7 +201,7 @@ render_state_init(uint32_t init_flags)
          }
       }
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
       if (want_neptune) {
          if (!npt_renderer_init(0, &render_state_npt_cbs)) {
 #ifdef ENABLE_VENUS
@@ -240,7 +240,7 @@ render_state_create_context(struct render_context *ctx,
             ctx->backend = RENDER_BACKEND_VENUS;
          break;
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
       case VIRTGPU_DRM_CAPSET_NEPTUNE:
          ok = npt_renderer_create_context(ctx->ctx_id, flags, name_len, name);
          if (ok)
@@ -275,7 +275,7 @@ render_state_destroy_context(uint32_t ctx_id)
          vkr_renderer_destroy_context(ctx_id);
          break;
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
       case RENDER_BACKEND_NEPTUNE:
          npt_renderer_destroy_context(ctx_id);
          break;
@@ -301,7 +301,7 @@ render_state_submit_cmd(uint32_t ctx_id, void *cmd, uint32_t size)
    case RENDER_BACKEND_VENUS:
       return vkr_renderer_submit_cmd(ctx_id, cmd, size);
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
    case RENDER_BACKEND_NEPTUNE:
       return npt_renderer_submit_cmd(ctx_id, cmd, size);
 #endif
@@ -326,7 +326,7 @@ render_state_submit_fence(uint32_t ctx_id,
    case RENDER_BACKEND_VENUS:
       return vkr_renderer_submit_fence(ctx_id, flags, ring_idx, fence_id);
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
    case RENDER_BACKEND_NEPTUNE:
       return npt_renderer_submit_fence(ctx_id, flags, ring_idx, fence_id);
 #endif
@@ -358,7 +358,7 @@ render_state_create_resource(uint32_t ctx_id,
                                           out_fd_type, out_res_fd, out_map_info,
                                           out_vulkan_info);
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
    case RENDER_BACKEND_NEPTUNE:
       return npt_renderer_create_resource(ctx_id, res_id, blob_id, blob_size,
                                           blob_flags, out_fd_type, out_res_fd,
@@ -386,7 +386,7 @@ render_state_import_resource(uint32_t ctx_id,
    case RENDER_BACKEND_VENUS:
       return vkr_renderer_import_resource(ctx_id, res_id, fd_type, fd, size);
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
    case RENDER_BACKEND_NEPTUNE:
       return npt_renderer_import_resource(ctx_id, res_id, fd_type, fd, size);
 #endif
@@ -409,7 +409,7 @@ render_state_destroy_resource(uint32_t ctx_id, uint32_t res_id)
       vkr_renderer_destroy_resource(ctx_id, res_id);
       break;
 #endif
-#ifdef ENABLE_NEPTUNE
+#ifdef ENABLE_NEPTUNE_BACKEND
    case RENDER_BACKEND_NEPTUNE:
       npt_renderer_destroy_resource(ctx_id, res_id);
       break;

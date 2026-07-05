@@ -108,6 +108,7 @@ venus_codegen = custom_target(
 )
 
 neptune_sources = [
+   'neptune/npt_capset.c',
    'neptune/npt_common.c',
    'neptune/npt_context.c',
    'neptune/npt_cs.c',
@@ -125,6 +126,12 @@ neptune_sources = [
    'neptune/npt_dispatch.c',
    'neptune/npt_overrides_toplevel.c',
    'neptune/npt_overrides_shared_handle.c',
+]
+
+# A proxy-only client build links no renderer backend; the capset
+# descriptor is the only neptune source it needs (see neptune-mode=client).
+neptune_client_sources = [
+   'neptune/npt_capset.c',
 ]
 
 drm_sources = [
@@ -236,7 +243,7 @@ if with_venus
    endif
 endif
 
-if with_neptune
+if with_neptune_backend
    virgl_sources += neptune_sources
    if with_host_darwin
       # macOS shares textures through d3dmetal-native's shared-resource
@@ -256,6 +263,12 @@ if with_neptune
       endif
       virgl_depends += [dxvk_dep]
    endif
+elif with_neptune
+   # Proxy-only client build: no renderer backend or presenter, just
+   # the small capset descriptor the proxy front-end advertises.  This is
+   # what allows a native (e.g. arm64) library that offloads rendering to an
+   # out-of-tree render server.
+   virgl_sources += neptune_client_sources
 endif
 
 if with_drm_renderers
@@ -315,23 +328,37 @@ libvirgl_dep = declare_dependency(
    include_directories: libvirgl_inc
 )
 
-libvirglrenderer = library(
-   'virglrenderer',
-   virglrenderer_sources,
-   include_directories: [inc_gallium, inc_configuration],
-   dependencies : [virgl_depends, libvirgl_dep, drm_uapi_dep],
-   version : binary_age.to_string() + '.'
-             + interface_age.to_string() + '.'
-             + revision.to_string(),
-   install : true
-)
+if neptune_server_only
+   # server-only: fold the public API + renderer into a static archive so
+   # the (x86_64) render server links it directly and ships as a single
+   # binary, with no public dylib installed to collide with a native
+   # client-mode library sharing the same prefix.
+   libvirglrenderer = static_library(
+      'virglrenderer',
+      virglrenderer_sources,
+      include_directories: [inc_gallium, inc_configuration],
+      dependencies : [virgl_depends, libvirgl_dep, drm_uapi_dep],
+      install : false,
+   )
+else
+   libvirglrenderer = library(
+      'virglrenderer',
+      virglrenderer_sources,
+      include_directories: [inc_gallium, inc_configuration],
+      dependencies : [virgl_depends, libvirgl_dep, drm_uapi_dep],
+      version : binary_age.to_string() + '.'
+                + interface_age.to_string() + '.'
+                + revision.to_string(),
+      install : true
+   )
 
-pkg = import('pkgconfig')
-pkg.generate(libvirglrenderer,
-   description: 'virgl GL renderer',
-   extra_cflags: pkg_cflags,
-   subdirs: 'virgl'
-)
+   pkg = import('pkgconfig')
+   pkg.generate(libvirglrenderer,
+      description: 'virgl GL renderer',
+      extra_cflags: pkg_cflags,
+      subdirs: 'virgl'
+   )
+endif
 
 libvirglrenderer_dep = declare_dependency(
    link_with: libvirglrenderer,
@@ -345,11 +372,16 @@ version_conf.set('VIRGL_MAJOR_VERSION', virgl_major_version)
 version_conf.set('VIRGL_MINOR_VERSION', virgl_minor_version)
 version_conf.set('VIRGL_MICRO_VERSION', virgl_micro_version)
 
+# A server-only build ships no public headers; generate the version header
+# (renderer sources may include it) but do not install it.
 configure_file(
   input: 'virgl-version.h.meson',
   output: 'virgl-version.h',
   configuration: version_conf,
+  install : not neptune_server_only,
   install_dir: join_paths(get_option('includedir'), 'virgl'),
 )
 
-install_headers('virglrenderer.h', subdir : 'virgl')
+if not neptune_server_only
+   install_headers('virglrenderer.h', subdir : 'virgl')
+endif
