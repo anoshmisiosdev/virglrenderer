@@ -110,6 +110,9 @@ struct virgl_egl {
 #ifdef WIN32
    ID3D11Device *d3d11_device;
 #endif
+#ifdef ENABLE_METAL
+   MTLDevice_id metal_device;
+#endif
 };
 
 static bool virgl_egl_has_extension_in_string(const char *haystack, const char *needle)
@@ -575,6 +578,85 @@ virgl_egl_win32_init(UNUSED struct virgl_egl *egl)
 #endif
 }
 
+#ifdef ENABLE_METAL
+#ifndef EGL_METAL_DEVICE_ANGLE
+#define EGL_METAL_DEVICE_ANGLE 0x34A6
+#endif
+#ifndef EGL_METAL_TEXTURE_ANGLE
+#define EGL_METAL_TEXTURE_ANGLE 0x34A7
+#endif
+#endif
+
+static void
+virgl_egl_metal_init(UNUSED struct virgl_egl *egl)
+{
+#ifdef ENABLE_METAL
+   EGLDeviceEXT device;
+   const char* device_ext = NULL;
+   MTLDevice_id metal_device;
+
+   if (!has_bits(egl->extension_bits, EGL_EXT_DEVICE_QUERY))
+      return;
+
+   if (!egl->funcs.eglQueryDisplayAttrib(egl->egl_display, EGL_DEVICE_EXT, (EGLAttrib*)&device))
+      return;
+
+   device_ext = egl->funcs.eglQueryDeviceString(device, EGL_EXTENSIONS);
+   if (!device_ext)
+      return;
+
+   if (!virgl_egl_has_extension_in_string(device_ext, "EGL_ANGLE_device_metal"))
+      return;
+
+   if (!egl->funcs.eglQueryDeviceAttrib(device, EGL_METAL_DEVICE_ANGLE, (EGLAttrib*)&metal_device))
+      return;
+
+   egl->metal_device = metal_device;
+#endif
+}
+
+#ifdef ENABLE_METAL
+bool virgl_egl_metal_create_texture(struct virgl_egl *egl, struct pipe_resource *res,
+                                    uint32_t format, MTLTexture_id *tex)
+{
+   MTLDevice_id device = egl->metal_device;
+   struct vrend_metal_texture_description desc = {
+      .width = res->width0,
+      .height = res->height0,
+      .bind = res->bind,
+      .usage = res->usage,
+      .format = format,
+   };
+
+   return virgl_metal_create_texture(device, &desc, tex);
+}
+
+bool virgl_egl_metal_create_texture_from_shm(struct virgl_egl *egl, int fd, size_t size,
+                                             const struct vrend_metal_texture_description *desc,
+                                             MTLTexture_id *tex)
+{
+   if (!egl || !egl->metal_device)
+      return false;
+
+   return virgl_metal_create_texture_from_shm(egl->metal_device, fd, size, desc, tex);
+}
+
+EGLImageKHR
+virgl_egl_metal_image_from_texture(struct virgl_egl *egl, MTLTexture_id tex)
+{
+   const EGLint attribs[] = {
+      EGL_NONE
+   };
+
+   if (!egl)
+      return NULL;
+
+   return eglCreateImageKHR(egl->egl_display, EGL_NO_CONTEXT,
+                            EGL_METAL_TEXTURE_ANGLE, (EGLClientBuffer)tex,
+                            attribs);
+}
+#endif
+
 struct virgl_egl *virgl_egl_init_external(EGLDisplay egl_display)
 {
    const char *extensions;
@@ -610,6 +692,7 @@ struct virgl_egl *virgl_egl_init_external(EGLDisplay egl_display)
 #endif
 
    virgl_egl_win32_init(egl);
+   virgl_egl_metal_init(egl);
    return egl;
 fail:
    free(egl);
@@ -838,7 +921,9 @@ void *virgl_egl_image_from_dmabuf(struct virgl_egl *egl,
                                     (EGLClientBuffer)NULL,
                                     attrs);
 }
+#endif
 
+#if defined(ENABLE_GBM) || defined(ENABLE_METAL)
 void virgl_egl_image_destroy(struct virgl_egl *egl, void *image)
 {
    eglDestroyImageKHR(egl->egl_display, image);

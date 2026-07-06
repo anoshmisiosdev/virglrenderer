@@ -482,7 +482,8 @@ void virgl_renderer_ctx_detach_resource(int ctx_id, int res_handle)
 
 static int virgl_renderer_resource_get_info_common(int res_handle,
                                                    struct virgl_renderer_resource_info *info,
-                                                   UNUSED void **d3d_tex2d)
+                                                   enum virgl_renderer_native_handle_type *type,
+                                                   virgl_renderer_native_handle *handle)
 {
    int ret = 0;
 
@@ -504,8 +505,19 @@ static int virgl_renderer_resource_get_info_common(int res_handle,
                                     (struct vrend_renderer_resource_info *)info);
 
 #ifdef WIN32
-   if (d3d_tex2d)
-      ret = vrend_renderer_resource_d3d11_texture2d(res->pipe_resource, d3d_tex2d);
+   if (type && handle) {
+      *handle = vrend_renderer_resource_d3d11_texture2d(res->pipe_resource);
+      if (*handle) {
+         *type = VIRGL_NATIVE_HANDLE_D3D_TEX2D;
+      }
+   }
+#elif defined(ENABLE_METAL)
+   if (type && handle) {
+      *handle = vrend_renderer_resource_metal_texture(res->pipe_resource);
+      if (*handle) {
+         *type = VIRGL_NATIVE_HANDLE_METAL_TEXTURE;
+      }
+   }
 #endif
 
    return ret;
@@ -517,7 +529,7 @@ int virgl_renderer_resource_get_info(int res_handle,
    TRACE_FUNC();
    int ret;
 
-   if ((ret = virgl_renderer_resource_get_info_common(res_handle, info, NULL)) != 0)
+   if ((ret = virgl_renderer_resource_get_info_common(res_handle, info, NULL, NULL)) != 0)
        return ret;
 
    if (state.winsys_initialized) {
@@ -540,7 +552,8 @@ int virgl_renderer_resource_get_info_ext(int res_handle,
 
    if ((ret = virgl_renderer_resource_get_info_common(res_handle,
                                                       &info_ext->base,
-                                                      &info_ext->d3d_tex2d)) != 0)
+                                                      &info_ext->native_type,
+                                                      &info_ext->native_handle)) != 0)
       return ret;
 
    info_ext->version = VIRGL_RENDERER_RESOURCE_INFO_EXT_VERSION;
@@ -911,8 +924,8 @@ int virgl_renderer_init(void *cookie, int flags, struct virgl_renderer_callbacks
          renderer_flags |= VREND_USE_EXTERNAL_BLOB;
       if (flags & VIRGL_RENDERER_USE_VIDEO)
          renderer_flags |= VREND_USE_VIDEO;
-      if (flags & VIRGL_RENDERER_D3D11_SHARE_TEXTURE)
-         renderer_flags |= VREND_D3D11_SHARE_TEXTURE;
+      if (flags & VIRGL_RENDERER_NATIVE_SHARE_TEXTURE)
+         renderer_flags |= VREND_NATIVE_SHARE_TEXTURE;
       if (flags & VIRGL_RENDERER_COMPAT_PROFILE)
          renderer_flags |= VREND_USE_COMPAT_CONTEXT;
       if (flags & VIRGL_RENDERER_USE_GLES)

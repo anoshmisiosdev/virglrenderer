@@ -401,7 +401,7 @@ struct global_renderer_state {
 #ifdef HAVE_EPOXY_EGL_H
    bool use_egl_fence : 1;
 #endif
-   bool d3d_share_texture : 1;
+   bool native_share_texture : 1;
    bool gbm_layout_feat : 1;
 };
 
@@ -1030,10 +1030,31 @@ static bool vrend_resource_supports_view(const struct vrend_resource *res,
           (vrend_resource_get_internal_format_override(res) == GL_NONE);
 }
 
+/* Imported BGRA EGL images are sampled with the red/blue channels swapped and
+ * need a compensating swizzle. Metal-backed resources use the correct
+ * MTLPixelFormat and are already channel-correct, so they must be excluded. */
+static inline bool
+vrend_resource_needs_redblue_swizzle(const struct vrend_resource *res,
+                                     enum virgl_formats view_format)
+{
+#ifdef ENABLE_METAL
+   if (res->metal_native)
+      return false;
+#endif
+   return !vrend_resource_supports_view(res, view_format) &&
+          vrend_format_is_bgra(view_format);
+}
+
 static inline bool
 vrend_resource_needs_srgb_decode(struct vrend_resource *res,
                                  enum virgl_formats view_format)
 {
+#ifdef ENABLE_METAL
+   /* Metal-backed resources use the correct sRGB MTLPixelFormat and decode
+    * natively, so the manual compensation must be skipped for them. */
+   if (res->metal_native)
+      return false;
+#endif
    return !vrend_resource_supports_view(res, view_format) &&
       util_format_is_srgb(res->base.format) &&
       !util_format_is_srgb(view_format);
@@ -1043,9 +1064,29 @@ static inline bool
 vrend_resource_needs_srgb_encode(struct vrend_resource *res,
                                  enum virgl_formats view_format)
 {
+#ifdef ENABLE_METAL
+   if (res->metal_native)
+      return false;
+#endif
    return !vrend_resource_supports_view(res, view_format) &&
       !util_format_is_srgb(res->base.format) &&
       util_format_is_srgb(view_format);
+}
+
+/* An sRGB EGL-backed surface has no GL sRGB internalformat, so linear->sRGB
+ * encoding is injected manually (in the fragment shader and glClearColor).
+ * Metal-backed resources use a real sRGB MTLPixelFormat and encode natively, so
+ * the manual conversion must be skipped to avoid double-encoding. */
+static inline bool
+vrend_resource_needs_manual_srgb_encode(const struct vrend_resource *res,
+                                        enum virgl_formats view_format)
+{
+#ifdef ENABLE_METAL
+   if (res->metal_native)
+      return false;
+#endif
+   return util_format_is_srgb(view_format) &&
+          !vrend_resource_supports_view(res, view_format);
 }
 
 static bool vrend_blit_needs_swizzle(enum virgl_formats src,
@@ -2751,8 +2792,7 @@ int vrend_create_sampler_view(struct vrend_context *ctx,
    for (enum pipe_swizzle i = 0; i < 4; ++i)
       view->gl_swizzle[i] = to_gl_swizzle(swizzle[i]);
 
-   if (!vrend_resource_supports_view(view->texture, view->format) &&
-       vrend_format_is_bgra(view->format)) {
+   if (vrend_resource_needs_redblue_swizzle(view->texture, view->format)) {
       /* Swap R/B channel for vulkan imported texture. */
       GLenum tmp = view->gl_swizzle[0];
       view->gl_swizzle[0] = view->gl_swizzle[2];
@@ -2818,8 +2858,7 @@ int vrend_create_sampler_view(struct vrend_context *ctx,
          * back, and still benefit from automatic srgb decoding.
          * If the red/blue swap is intended, we just let it happen and don't
          * need to explicit change to the sampler's swizzle parameters. */
-        if (!vrend_resource_supports_view(view->texture, view->format) &&
-            vrend_format_is_bgra(view->format)) {
+        if (vrend_resource_needs_redblue_swizzle(view->texture, view->format)) {
               VREND_DEBUG(dbg_tex, ctx, "texture view with red/blue swizzle created for EGL-backed texture sampler"
                           " (format: %s; view: %s)\n",
                           util_format_name(view->texture->base.format),
@@ -3130,16 +3169,14 @@ static void vrend_hw_emit_framebuffer_state(struct vrend_sub_context *sub_ctx)
        * be necessary, e.g. for rgb* views on bgr* resources. Ensure this
        * happens by adding a shader swizzle to the final write of such surfaces.
        */
-      if (!vrend_resource_supports_view(surf->texture, surf->format) &&
-          vrend_format_is_bgra(surf->format))
+      if (vrend_resource_needs_redblue_swizzle(surf->texture, surf->format))
          sub_ctx->swizzle_output_rgb_to_bgr |= 1 << i;
 
       /* glTextureView() on eglimage-backed bgr* textures for is not supported.
        * To work around this for colorspace conversion, views are avoided
        * manual colorspace conversion is instead injected in the fragment
        * shader writing to such surfaces and during glClearColor(). */
-      if (util_format_is_srgb(surf->format) &&
-          !vrend_resource_supports_view(surf->texture, surf->format)) {
+      if (vrend_resource_needs_manual_srgb_encode(surf->texture, surf->format)) {
          VREND_DEBUG(dbg_tex, sub_ctx->parent,
                      "manually converting linear->srgb for EGL-backed framebuffer color attachment 0x%x"
                      " (surface format is %s; resource format is %s)\n",
@@ -4692,8 +4729,7 @@ vrend_color_encode_as_srgb(float color) {
 static void vrend_clear_prepare(struct vrend_sub_context *sub_ctx,
                                 struct vrend_surface *surf, unsigned buffers,
                                 float *colorf, double depth, unsigned stencil) {
-   if (surf && util_format_is_srgb(surf->format) &&
-       !vrend_resource_supports_view(surf->texture, surf->format)) {
+   if (surf && vrend_resource_needs_manual_srgb_encode(surf->texture, surf->format)) {
       VREND_DEBUG(dbg_tex, sub_ctx->parent,
                   "manually converting glClearColor from linear->srgb colorspace for EGL-backed framebuffer color attachment"
                   " (surface format is %s; resource format is %s)\n",
@@ -4706,9 +4742,8 @@ static void vrend_clear_prepare(struct vrend_sub_context *sub_ctx,
    if (buffers & PIPE_CLEAR_COLOR) {
       if (surf && vrend_format_is_emulated_alpha(surf->format)) {
          glClearColor(colorf[3], 0.0, 0.0, 0.0);
-      } else if (surf && 
-                 (!vrend_resource_supports_view(surf->texture, surf->format) &&
-                  vrend_format_is_bgra(surf->format))) {
+      } else if (surf &&
+                 vrend_resource_needs_redblue_swizzle(surf->texture, surf->format)) {
          VREND_DEBUG(dbg_bgra, sub_ctx->parent, "swizzling glClearColor() since rendering surface is an externally-stored BGR* resource\n");
          glClearColor(colorf[2], colorf[1], colorf[0], colorf[3]);
       } else {
@@ -7766,7 +7801,7 @@ int vrend_renderer_init(const struct vrend_if_cbs *cbs, uint32_t flags)
    }
 #endif
 
-   vrend_state.d3d_share_texture = flags & VREND_D3D11_SHARE_TEXTURE;
+   vrend_state.native_share_texture = flags & VREND_NATIVE_SHARE_TEXTURE;
 
    vrend_state.gbm_layout_feat = vrend_use_gbm_layout_feature(flags);
 
@@ -8546,7 +8581,7 @@ static void vrend_resource_d3d_init(UNUSED struct vrend_resource *gr, UNUSED uin
    };
    ID3D11Texture2D* d3d_tex2d = NULL;
 
-   if (!vrend_state.d3d_share_texture)
+   if (!vrend_state.native_share_texture)
       return;
 
    if ((gr->base.bind & VIRGL_RES_BIND_SCANOUT) == 0)
@@ -8575,7 +8610,7 @@ static void vrend_resource_d3d_init(UNUSED struct vrend_resource *gr, UNUSED uin
 
    gr->d3d_tex2d = d3d_tex2d;
 
-   gr->storage_bits |= VREND_STORAGE_D3D_TEXTURE;
+   gr->storage_bits |= VREND_STORAGE_NATIVE_TEXTURE;
    gr->storage_bits |= VREND_STORAGE_EGL_IMAGE;
    return;
 
@@ -8583,6 +8618,45 @@ fail:
    if (d3d_tex2d)
       d3d_tex2d->lpVtbl->Release(gr->d3d_tex2d);
    gr->d3d_tex2d = NULL;
+#endif
+}
+
+/*
+ * When using ANGLE/Metal, this function creates a Metal Texture and
+ * EGL image given certain flags.
+ */
+static void vrend_resource_metal_init(UNUSED struct vrend_resource *gr, UNUSED uint32_t format)
+{
+#if defined(ENABLE_METAL) && defined(HAVE_EPOXY_EGL_H)
+   MTLTexture_id tex = NULL;
+
+   if (!vrend_state.native_share_texture)
+      return;
+
+   if ((gr->base.bind & VIRGL_RES_BIND_SCANOUT) == 0)
+      return;
+
+   if (gr->base.depth0 != 1 || gr->base.last_level != 0 || gr->base.nr_samples > 1)
+      return;
+
+   if (!virgl_egl_metal_create_texture(egl, &gr->base, format, &tex))
+      goto fail;
+
+   gr->egl_image = virgl_egl_metal_image_from_texture(egl, tex);
+   if (!gr->egl_image)
+      goto fail;
+
+   gr->metal_texture = tex;
+   gr->metal_native = true;
+
+   gr->storage_bits |= VREND_STORAGE_NATIVE_TEXTURE;
+   gr->storage_bits |= VREND_STORAGE_EGL_IMAGE;
+   return;
+
+fail:
+   if (tex)
+      virgl_metal_release_texture(tex);
+   gr->metal_texture = NULL;
 #endif
 }
 
@@ -8675,6 +8749,7 @@ static int vrend_resource_alloc_texture(struct vrend_resource *gr,
 
    if (!image_oes) {
       vrend_resource_d3d_init(gr, format);
+      vrend_resource_metal_init(gr, format);
       vrend_resource_gbm_init(gr, format);
       if (gr->gbm_bo && !has_bit(gr->storage_bits, VREND_STORAGE_EGL_IMAGE))
          return 0;
@@ -8924,7 +8999,7 @@ void vrend_renderer_resource_destroy(struct vrend_resource *res)
       glDeleteMemoryObjectsEXT(1, &res->memobj);
    }
 
-#ifdef ENABLE_GBM
+#if (defined(ENABLE_GBM) || defined(ENABLE_METAL)) && defined(HAVE_EPOXY_EGL_H)
    if (res->egl_image) {
       virgl_egl_image_destroy(egl, res->egl_image);
       for (unsigned i = 0; i < ARRAY_SIZE(res->aux_plane_egl_image); i++) {
@@ -8941,6 +9016,10 @@ void vrend_renderer_resource_destroy(struct vrend_resource *res)
 #ifdef WIN32
    if (res->d3d_tex2d)
       res->d3d_tex2d->lpVtbl->Release(res->d3d_tex2d);
+#endif
+#ifdef ENABLE_METAL
+   if (res->metal_texture)
+      virgl_metal_release_texture(res->metal_texture);
 #endif
    free(res);
 }
@@ -10838,6 +10917,10 @@ static inline bool
 vrend_blit_resource_needs_redblue_swizzle(struct vrend_resource *res,
                                      enum virgl_formats view_format)
 {
+#ifdef ENABLE_METAL
+   if (res->metal_native)
+      return false;
+#endif
    return !vrend_resource_supports_view(res, view_format) &&
          vrend_format_is_bgra(res->base.format) ^ vrend_format_is_bgra(view_format);
 }
@@ -13123,26 +13206,34 @@ void vrend_renderer_resource_get_info(struct pipe_resource *pres,
    info->stride = util_format_get_nblocksx(res->base.format, u_minify(res->base.width0, 0)) * elsize;
 }
 
-int
-vrend_renderer_resource_d3d11_texture2d(struct pipe_resource *pres, void **d3d_tex2d)
+void *
+vrend_renderer_resource_d3d11_texture2d(struct pipe_resource *pres)
 {
 #ifdef WIN32
    struct vrend_resource *res = (struct vrend_resource *)pres;
 
-   if (!vrend_state.d3d_share_texture)
-      return 0;
-
-   if (!res->d3d_tex2d)
-      return EINVAL;
-
-   *d3d_tex2d = res->d3d_tex2d;
-   return 0;
+   if (!vrend_state.native_share_texture)
+      return NULL;
+   else
+      return res->d3d_tex2d;
 #else
    (void)pres;
-   (void)d3d_tex2d;
-   return ENOTSUP;
+   return NULL;
 #endif
 }
+
+#ifdef ENABLE_METAL
+MTLTexture_id
+vrend_renderer_resource_metal_texture(struct pipe_resource *pres)
+{
+   struct vrend_resource *res = (struct vrend_resource *)pres;
+
+   if (!vrend_state.native_share_texture)
+      return NULL;
+   else
+      return res->metal_texture;
+}
+#endif
 
 void vrend_renderer_get_cap_set(uint32_t cap_set, uint32_t *max_ver,
                                 uint32_t *max_size)
@@ -13403,9 +13494,6 @@ vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
       };
       struct vrend_resource *gr;
 
-      if (res->fd_type != VIRGL_RESOURCE_FD_DMABUF)
-         return EINVAL;
-
       gr = vrend_resource_create(&create_args);
       if (!gr)
          return ENOMEM;
@@ -13413,6 +13501,10 @@ vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
 #ifdef HAVE_EPOXY_EGL_H
       if (egl) {
 #ifdef ENABLE_GBM
+         if (res->fd_type != VIRGL_RESOURCE_FD_DMABUF) {
+            FREE(gr);
+            return EINVAL;
+         }
          int plane_fds[VIRGL_GBM_MAX_PLANES];
          uint32_t virgl_format;
          uint32_t drm_format;
@@ -13453,7 +13545,56 @@ vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
             return ret;
          }
 
-#else /* ENABLE_GBM */
+#elif defined(ENABLE_METAL)
+         int ret;
+
+         /* A Neptune or Venus context exports a blob resource as shared memory
+          * backing a MTLBuffer (see vkr_mtl_shm / npt_swapchain_d3dmetal). Wrap
+          * the shared-memory FD back into a MTLTexture and hand it to ANGLE.
+          */
+         if (res->fd_type != VIRGL_RESOURCE_FD_SHM) {
+            FREE(gr);
+            return EINVAL;
+         }
+         if (args->plane_count > 1) {
+            virgl_warn("%s: ignoring plane_count = %d and using the first one\n",
+                       __func__, args->plane_count);
+         }
+         const struct vrend_metal_texture_description desc = {
+            .width = args->width,
+            .height = args->height,
+            .stride = args->plane_strides[0],
+            .offset = args->plane_offsets[0],
+            .bind = args->bind,
+            .usage = args->usage,
+            .format = args->format,
+         };
+         MTLTexture_id texture;
+
+         if (!virgl_egl_metal_create_texture_from_shm(egl, res->fd, res->map_size,
+                                                      &desc, &texture)) {
+            FREE(gr);
+            virgl_error("%s: failed to create texture from shared memory\n", __func__);
+            return EINVAL;
+         }
+         gr->egl_image = virgl_egl_metal_image_from_texture(egl, texture);
+         virgl_metal_release_texture(texture);
+         if (!gr->egl_image) {
+            virgl_error("%s: failed to create egl image\n", __func__);
+            FREE(gr);
+            return EINVAL;
+         }
+
+         gr->metal_native = true;
+         gr->storage_bits |= VREND_STORAGE_EGL_IMAGE;
+
+         ret = vrend_resource_alloc_texture(gr, args->format, gr->egl_image);
+         if (ret) {
+            virgl_egl_image_destroy(egl, gr->egl_image);
+            FREE(gr);
+            return ret;
+         }
+#else /* !ENABLE_METAL && !ENABLE_GBM */
          FREE(gr);
          virgl_error("%s: no EGL/GBM support \n", __func__);
          return EINVAL;
