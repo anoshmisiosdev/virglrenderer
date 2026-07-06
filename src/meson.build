@@ -60,6 +60,10 @@ vrend_winsys_glx_sources = [
    'vrend/vrend_winsys_glx.c',
 ]
 
+vrend_metal_sources = [
+   'vrend/vrend_metal.m',
+]
+
 venus_sources = [
    'venus/vkr_acceleration_structure.c',
    'venus/vkr_allocator.c',
@@ -206,6 +210,13 @@ endif
 if have_glx
    virgl_sources += vrend_winsys_glx_sources
    virgl_depends += [glx_dep]
+endif
+
+if metal_dep.found()
+   virgl_sources += vrend_metal_sources
+   # Foundation pulls in the Objective-C runtime (libobjc) that vrend_metal.m
+   # needs; without it a Metal-only (e.g. venus-less) build fails to link.
+   virgl_depends += [metal_dep, dependency('appleframeworks', modules : ['Foundation'])]
 endif
 
 if with_venus
