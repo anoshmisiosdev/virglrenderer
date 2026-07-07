@@ -274,6 +274,14 @@ render_worker_jail_reap_any_worker(struct render_worker_jail *jail, bool block)
    if (!pid)
       return NULL;
 
+   /* A worker dying abnormally strands its guest context on dead rings
+    * (the app spins forever); make such exits loud. */
+   if (siginfo.si_code == CLD_KILLED || siginfo.si_code == CLD_DUMPED)
+      render_log("worker %d DIED on signal %d%s", pid, siginfo.si_status,
+                 siginfo.si_code == CLD_DUMPED ? " (core dumped)" : "");
+   else if (siginfo.si_code == CLD_EXITED && siginfo.si_status != 0)
+      render_log("worker %d exited with status %d", pid, siginfo.si_status);
+
    list_for_each_entry (struct render_worker, worker, &jail->workers, head) {
       if (worker->pid == pid) {
          worker->reaped = true;
