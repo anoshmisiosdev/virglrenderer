@@ -405,20 +405,37 @@ npt_ring_thread(void *arg)
             ring->feedback_notify || npt_ring_feedback_pending(ctx);
          ring->feedback_notify = false;
 
+         /* Dekker pairing with the guest submit path (store tail, then
+          * load status): set IDLE with a seq_cst RMW BEFORE deciding
+          * from the tail whether to sleep.  The guest orders its tail
+          * store before its status load with a full fence, so at least
+          * one side always sees the other: either the tail read below
+          * sees the new tail and the wait is skipped, or the guest sees
+          * IDLE and rings the doorbell, which takes ring->mutex and so
+          * cannot land between this decision and the wait.  Deciding
+          * from a tail read taken before the IDLE transition lets a
+          * submit slip through the gap -- guest misses IDLE (no
+          * doorbell), host misses the tail -> the ring parks with work
+          * already published. */
+         npt_ring_set_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
          const bool wait = ring->buffer.cur == npt_ring_load_tail(ring);
-         if (wait) {
-            npt_ring_set_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
-            if (ring->started) {
-               if (poll_owed) {
-                  /* Sleep straight to the next poll deadline instead of
-                   * spending the yield/10us relax ramp to get there. */
-                  npt_ring_cond_wait_ns(ring, NPT_FEEDBACK_POLL_INTERVAL_NS);
-               } else {
-                  cnd_wait(&ring->cond, &ring->mutex);
-               }
+         if (wait && ring->started) {
+            if (poll_owed) {
+               /* Sleep straight to the next poll deadline instead of
+                * spending the yield/10us relax ramp to get there. */
+               npt_ring_cond_wait_ns(ring, NPT_FEEDBACK_POLL_INTERVAL_NS);
+            } else {
+               /* Bounded backstop rather than an unbounded park: the
+                * blob pages the tail lives in can lag reconciliation
+                * (the page-staleness race the guest-side relax works
+                * around), so a stale tail read despite the ordering
+                * above has to recover by timeout instead of wedging the
+                * ring.  100 ms keeps an idle ring near ~10 wakeups/s,
+                * preserving the point of parking. */
+               npt_ring_cond_wait_ns(ring, 100ull * 1000 * 1000);
             }
-            npt_ring_unset_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
          }
+         npt_ring_unset_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
          /* Only a guest doorbell puts the thread back on the hot path.
           * A poll-cadence timeout or a feedback wake must not, or the
           * thread drops out of the idle regime into the relax spin the
@@ -703,19 +720,30 @@ npt_ring_create_from_cmd(struct npt_context *ctx,
 
    ring->id = cmd->ring_id;
 
+   /* Arm the ring as monitored and stamp a first ALIVE heartbeat before
+    * publishing it to ctx->rings, under the same lock the monitor thread
+    * scans.  The monitor is the only writer of the ALIVE bit and ticks
+    * lazily on monitor_report_period_us, which is slower than the guest's
+    * ring watchdog: without a heartbeat stamped before the ring is
+    * reachable, the watchdog can observe a created-but-unserviced ring
+    * and tear it down. */
    mtx_lock(&ctx->ring_mutex);
+   if (cmd->monitor_report_period_us) {
+      ring->monitor = true;
+      npt_ring_set_status_bits(ring, NPT_RING_STATUS_ALIVE_BIT);
+   }
    list_addtail(&ring->head, &ctx->rings);
    mtx_unlock(&ctx->ring_mutex);
 
-   if (cmd->monitor_report_period_us) {
-      if (!npt_context_ring_monitor_init(ctx, cmd->monitor_report_period_us)) {
-         /* Non-fatal: the ring still works; the guest's hard abort
-          * timer covers wedged-host detection. */
-         npt_log("create_ring: failed to start ring monitor for ring %"
-                 PRIu64, cmd->ring_id);
-      } else {
-         ring->monitor = true;
-      }
+   if (cmd->monitor_report_period_us &&
+       !npt_context_ring_monitor_init(ctx, cmd->monitor_report_period_us)) {
+      /* The heartbeat above will never be refreshed without a live
+       * monitor thread, so fail loudly (decoder goes fatal, guest sees
+       * NPT_RING_STATUS_FATAL_BIT and tears down cleanly) rather than
+       * silently leaving the guest to spin its watchdog to a hard abort. */
+      npt_log("create_ring: failed to start ring monitor for ring %"
+              PRIu64, cmd->ring_id);
+      return false;
    }
 
    if (cmd->priority_valid) {
