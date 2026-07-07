@@ -16,7 +16,8 @@
 #include "npt_feedback.h"
 #include "npt_resource.h"
 #include "npt_ring.h"
-#include "npt_swapchain.h"
+#include "npt_shared.h"
+#include "npt_transport_defs.h"
 #include "neptune-protocol/npt_protocol_host_dispatch.h"
 
 /* True when the decoder belongs to a ring, not the context.
@@ -140,75 +141,12 @@ npt_dispatch_write_ring_extra(struct npt_context *ctx,
 }
 
 static void
-npt_dispatch_get_swapchain_images(struct npt_context *ctx,
-                                  struct npt_cs_decoder *dec,
-                                  struct npt_cs_encoder *enc,
-                                  const struct npt_command_header *header)
-{
-   struct npt_cmd_get_swapchain_images cmd;
-   cmd.header = *header;
-   npt_cs_decoder_read(dec, sizeof(cmd) - sizeof(cmd.header),
-                       &cmd.swapchain_id,
-                       sizeof(cmd) - sizeof(cmd.header));
-   if (npt_cs_decoder_get_fatal(dec))
-      return;
-
-   struct npt_cmd_get_swapchain_images_reply reply;
-   memset(&reply, 0, sizeof(reply));
-   reply.header.cmd_type = header->cmd_type;
-   (void)npt_swapchain_get_images(ctx, cmd.swapchain_id, cmd.data_res_id,
-                                  cmd.data_off, &reply.ret);
-
-   if (cmd.header.cmd_flags & NPT_CMD_FLAG_REPLY) {
-      if (npt_cs_encoder_acquire(enc)) {
-         npt_cs_encoder_write(enc, sizeof(reply), &reply, sizeof(reply));
-         npt_cs_encoder_release(enc);
-      }
-   }
-}
-
-static void
-npt_dispatch_set_preferred_display_info(struct npt_context *ctx,
-                                        struct npt_cs_decoder *dec,
-                                        const struct npt_command_header *header)
-{
-   struct npt_cmd_set_preferred_display_info cmd;
-   cmd.header = *header;
-   npt_cs_decoder_read(dec, sizeof(cmd) - sizeof(cmd.header),
-                       &cmd.virgl_format,
-                       sizeof(cmd) - sizeof(cmd.header));
-   if (npt_cs_decoder_get_fatal(dec))
-      return;
-
-   npt_swapchain_set_display_hints(ctx, cmd.virgl_format,
-                                   cmd.refresh_num, cmd.refresh_den,
-                                   cmd.app_path, cmd.app_path_len);
-}
-
-static void
 npt_dispatch_com_release(struct npt_context *ctx,
                          UNUSED struct npt_cs_decoder *dec,
                          UNUSED struct npt_cs_encoder *enc,
                          const struct npt_command_header *header)
 {
    npt_context_release_object(ctx, header->object_id);
-}
-
-static void
-npt_dispatch_image_release(struct npt_context *ctx,
-                            struct npt_cs_decoder *dec,
-                            UNUSED struct npt_cs_encoder *enc,
-                            const struct npt_command_header *header)
-{
-   struct npt_cmd_image_release cmd;
-   cmd.header = *header;
-   npt_cs_decoder_read(dec, sizeof(cmd) - sizeof(cmd.header),
-                       &cmd.image_index,
-                       sizeof(cmd) - sizeof(cmd.header));
-   if (npt_cs_decoder_get_fatal(dec))
-      return;
-
-   npt_swapchain_image_release_by_id(ctx, header->object_id, cmd.image_index);
 }
 
 static void
@@ -362,6 +300,7 @@ npt_dispatch_map_resource(struct npt_context *ctx,
       cmd.access_flags, cmd.api_map_flags, cmd.shmem_res_id,
       cmd.read_range_begin, cmd.read_range_end,
       cmd.byte_size, cmd.mip_height, cmd.mip_depth,
+      cmd.shmem_offset,
       &reply.row_pitch, &reply.depth_pitch, &reply.mapped_size);
 
    if (header->cmd_flags & NPT_CMD_FLAG_REPLY) {
@@ -655,22 +594,72 @@ npt_dispatch_subgroup_resource(struct npt_context *ctx,
    }
 }
 
+static void
+npt_dispatch_shared_export_blob(struct npt_context *ctx,
+                                struct npt_cs_decoder *dec,
+                                struct npt_cs_encoder *enc,
+                                const struct npt_command_header *header)
+{
+   struct npt_cmd_shared_export_blob cmd;
+   cmd.header = *header;
+   npt_cs_decoder_read(dec, sizeof(cmd) - sizeof(cmd.header),
+                       &cmd.blob_id, sizeof(cmd) - sizeof(cmd.header));
+   if (npt_cs_decoder_get_fatal(dec))
+      return;
+
+   HRESULT hr = npt_shared_export_blob(ctx, header->object_id, cmd.blob_id,
+                                       cmd.data_res_id, cmd.data_off);
+
+   if (cmd.header.cmd_flags & NPT_CMD_FLAG_REPLY) {
+      struct npt_cmd_shared_export_blob_reply reply;
+      memset(&reply, 0, sizeof(reply));
+      reply.header.cmd_type = header->cmd_type;
+      reply.header.cmd_return = (uint32_t)(int32_t)hr;
+      if (npt_cs_encoder_acquire(enc)) {
+         npt_cs_encoder_write(enc, sizeof(reply), &reply, sizeof(reply));
+         npt_cs_encoder_release(enc);
+      }
+   }
+}
+
+static void
+npt_dispatch_shared_open_res(struct npt_context *ctx,
+                             struct npt_cs_decoder *dec,
+                             struct npt_cs_encoder *enc,
+                             const struct npt_command_header *header)
+{
+   struct npt_cmd_shared_open_res cmd;
+   cmd.header = *header;
+   npt_cs_decoder_read(dec, sizeof(cmd) - sizeof(cmd.header),
+                       &cmd.mint_object_id, sizeof(cmd) - sizeof(cmd.header));
+   if (npt_cs_decoder_get_fatal(dec))
+      return;
+
+   HRESULT hr = npt_shared_open_res(ctx, header->object_id, &cmd);
+
+   struct npt_cmd_shared_open_res_reply reply;
+   memset(&reply, 0, sizeof(reply));
+   reply.header.cmd_type = header->cmd_type;
+   reply.header.cmd_return = (uint32_t)(int32_t)hr;
+   if (npt_cs_encoder_acquire(enc)) {
+      npt_cs_encoder_write(enc, sizeof(reply), &reply, sizeof(reply));
+      npt_cs_encoder_release(enc);
+   }
+}
+
 static bool
-npt_dispatch_subgroup_wsi(struct npt_context *ctx,
-                          struct npt_cs_decoder *dec,
-                          struct npt_cs_encoder *enc,
-                          const struct npt_command_header *header,
-                          uint32_t method)
+npt_dispatch_subgroup_shared(struct npt_context *ctx,
+                             struct npt_cs_decoder *dec,
+                             struct npt_cs_encoder *enc,
+                             const struct npt_command_header *header,
+                             uint32_t method)
 {
    switch (method) {
-   case NPT_TRANSPORT_WSI_GET_SWAPCHAIN_IMAGES:
-      npt_dispatch_get_swapchain_images(ctx, dec, enc, header);
+   case NPT_TRANSPORT_SHARED_EXPORT_BLOB:
+      npt_dispatch_shared_export_blob(ctx, dec, enc, header);
       return true;
-   case NPT_TRANSPORT_WSI_IMAGE_RELEASE:
-      npt_dispatch_image_release(ctx, dec, enc, header);
-      return true;
-   case NPT_TRANSPORT_WSI_SET_PREFERRED_DISPLAY_INFO:
-      npt_dispatch_set_preferred_display_info(ctx, dec, header);
+   case NPT_TRANSPORT_SHARED_OPEN_RES:
+      npt_dispatch_shared_open_res(ctx, dec, enc, header);
       return true;
    default:
       return false;
@@ -787,8 +776,8 @@ npt_transport_dispatch(struct npt_context *ctx,
       matched = npt_dispatch_subgroup_resource(ctx, dispatch, dec, enc,
                                                header, method);
       break;
-   case NPT_TRANSPORT_SUBGROUP_WSI:
-      matched = npt_dispatch_subgroup_wsi(ctx, dec, enc, header, method);
+   case NPT_TRANSPORT_SUBGROUP_SHARED:
+      matched = npt_dispatch_subgroup_shared(ctx, dec, enc, header, method);
       break;
    case NPT_TRANSPORT_SUBGROUP_EVENT:
       matched = npt_dispatch_subgroup_event(ctx, dec, enc, header, method);

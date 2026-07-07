@@ -608,7 +608,8 @@ npt_ring_create_from_cmd(struct npt_context *ctx,
 
    npt_ring_start(ring);
 
-   npt_log("created ring %" PRIu64 " for context %u", cmd->ring_id, ctx->ctx_id);
+   npt_log("created ring %" PRIu64 " for context %u (blob res_id=%u)",
+           cmd->ring_id, ctx->ctx_id, cmd->res_id);
    return true;
 }
 

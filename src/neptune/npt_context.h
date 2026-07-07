@@ -17,7 +17,7 @@
 
 struct npt_queue;
 
-/* Server-created resource (e.g. swapchain dmabuf image) that the
+/* Server-created resource (a shared texture's dmabuf export) that the
  * guest later claims via create_blob. */
 struct npt_pending_blob {
    uint64_t blob_id;
@@ -26,15 +26,18 @@ struct npt_pending_blob {
    uint64_t size;
 };
 
-/* Map/Unmap bookkeeping lives on the SHM blob (D3D11/12 resources have
- * no npt_resource entry); the wire ops carry shmem_res_id for lookup. */
-struct npt_resource_map_state {
-   void    *mapped_data;   /* host pointer returned by D3D11/12 Map */
-   uint32_t row_pitch;
-   uint32_t depth_pitch;
-   uint32_t mapped_size;
+/* Sync Map/Unmap bookkeeping.  Keyed by (resource_id, subresource):
+ * the map pool packs many resources' slots into ONE shm blob, so state
+ * cannot live on the blob — two overlapping sync maps of pool
+ * neighbours would clobber each other's mapped_data and mismatch their
+ * unmaps.  Kept in a per-context table (all map/unmap for a context
+ * run on its ring thread; no locking needed). */
+struct npt_sync_map_entry {
+   uint64_t resource_id;
+   uint32_t subresource;
    uint32_t access_flags;  /* NPT_MAP_ACCESS_* — decides copy direction */
-   bool     is_mapped;
+   void    *mapped_data;   /* host pointer returned by D3D11/12 Map */
+   uint32_t mapped_size;
    bool     persistent;    /* D3D12 persistent map: no Unmap expected */
 };
 
@@ -50,10 +53,6 @@ struct npt_resource {
    } u;
 
    size_t size;
-
-   /* Only used for SHM resources acting as MAP/UNMAP transfer blobs.
-    * Zero-initialised by calloc. */
-   struct npt_resource_map_state map_state;
 };
 
 struct npt_context {
@@ -101,6 +100,14 @@ struct npt_context {
    mtx_t resource_mutex;
    struct hash_table *resource_table;
 
+   /* Active sync maps, keyed (resource_id, subresource); see
+    * npt_sync_map_entry.  Touched only from the ring thread. */
+   struct {
+      struct npt_sync_map_entry *entries;
+      uint32_t count;
+      uint32_t cap;
+   } sync_maps;
+
    /* Object handle table.  Maps guest-visible object_id (host COM
     * pointer cast to uint64_t) to npt_object_type, so handle lookup
     * can reject ids the guest never obtained from Create* / QI.
@@ -111,50 +118,19 @@ struct npt_context {
    mtx_t pending_blob_mutex;
    struct hash_table *pending_blob_table;  /* blob_id -> npt_pending_blob */
 
-   /* Guest-supplied display hints from SET_PREFERRED_DISPLAY_INFO.
-    * Consumed at CreateSwapChain time only; updates after creation do
-    * not retroactively affect an existing swapchain.  0 in any field
-    * means "no preference, host uses its default". */
-   _Atomic uint32_t preferred_virgl_format;
-   _Atomic uint32_t preferred_refresh_num;
-   _Atomic uint32_t preferred_refresh_den;
-
    /* Indexed by guest-supplied ring_idx; entry 0 is unused (ring_idx
     * 0 means "retire on CPU timeline").  Lazily populated when the
     * first fence on a given ring_idx arrives.
     *
     * Partition:
     *   0                          : CPU timeline
-    *   [1, NPT_EVENT_RING_BASE)   : Present fences (per-swapchain)
+    *   [1, NPT_EVENT_RING_BASE)   : reserved
     *   [NPT_EVENT_RING_BASE, end) : Win32 event proxies
     *
     * NPT_EVENT_RING_BASE must equal (sync_queues count / 2) in
-    * lockstep with the guest driver, or an event-ring fence routes
-    * into the present-done FIFO wait and deadlocks the dispatch
-    * thread. */
+    * lockstep with the guest driver. */
    mtx_t sync_queues_mutex;
    struct npt_queue *sync_queues[64];
-
-   /* FIFO of GPU-done sync_file fds produced by the host swapchain's
-    * present callback.  Steady-state depth 0 or 1; the cap guards
-    * against runaway accumulation when the guest stops consuming.
-    *
-    * submit_fence does a non-blocking try-pop on the proxy dispatch
-    * thread; on empty FIFO it submits a deferred queue entry and the
-    * per-ring queue worker performs the unbounded cnd_wait
-    * (off the BQL path).  This preserves 1:1 pairing between guest
-    * and host frame index — a synchronous fall-through retire would
-    * misalign every subsequent frame.  shutting_down breaks the
-    * worker's wait on context teardown. */
-   mtx_t       present_done_mutex;
-   cnd_t       present_done_cond;
-   bool        present_done_shutting_down;
-   struct list_head present_done_fds;
-   uint32_t    present_done_count;
-   /* Per-context push counter for NPT_DEBUG=fence_trace: stamped on
-    * each push, carried through the pop so a single trace line can
-    * join (push, pop) and the guest-side NPT-PRESENT-TIMING #N. */
-   _Atomic uint64_t present_done_push_seq;
 
    /* Win32 event HANDLE emulation: each proxy owns an eventfd handed
     * to the host D3D library as the HANDLE.  event_pending_arms
@@ -180,25 +156,7 @@ struct npt_context {
    struct list_head head;
 };
 
-struct npt_present_done_entry {
-   int sync_fd;
-   /* Recorded at push time so the matching pop can emit a trace line
-    * naming the frame.  CLOCK_MONOTONIC ns; push_seq is the per-context
-    * monotonic counter. */
-   uint32_t image_index;
-   uint64_t frame_id;
-   uint64_t push_t_ns;
-   uint64_t push_seq;
-   struct list_head head;
-};
-
-/* Forward decl; full definition lives in npt_profile.h alongside the
- * helper that consumes it. */
-struct npt_pop_info;
-
-#define NPT_PRESENT_DONE_FIFO_MAX 16u
-
-/* Half of sync_queues[] is Present rings, half is event proxies.
+/* Half of sync_queues[] is reserved rings, half is event proxies.
  * Must be (sizeof sync_queues / sizeof sync_queues[0]) / 2 in lockstep
  * with the guest driver. */
 #define NPT_EVENT_RING_BASE 32u
@@ -225,33 +183,14 @@ npt_context_dispatch_one_command(struct npt_context *ctx,
                                  struct npt_cs_decoder *dec,
                                  struct npt_cs_encoder *enc);
 
-/* ring_idx 0 retires immediately on the CPU timeline; otherwise
- * lazily creates an npt_queue and pushes a sync onto its worker
- * thread.  The wait target comes from the per-context present-done
- * FIFO (present rings) or a pending ARM_EVENT_FENCE (event rings). */
+/* ring_idx 0 retires immediately on the CPU timeline; event rings
+ * (>= NPT_EVENT_RING_BASE) wait on the pending ARM_EVENT_FENCE's
+ * proxy eventfd via a per-ring npt_queue worker. */
 bool
 npt_context_submit_fence(struct npt_context *ctx,
                          uint32_t flags,
                          uint32_t ring_idx,
                          uint64_t fence_id);
-
-/* Takes ownership of \p sync_fd; closes it on overflow.  image_index
- * and frame_id are recorded on the entry for the fence_trace log line
- * that fires at pop time. */
-void
-npt_context_push_present_done(struct npt_context *ctx, int sync_fd,
-                              uint32_t image_index, uint64_t frame_id);
-
-/* Blocking pop intended for the npt_queue worker thread.  Returns -1
- * on context shutdown.  MUST NOT run on the proxy dispatch thread:
- * that path holds QEMU's BQL and stalling here freezes the VM.  The
- * dispatch thread instead uses a non-blocking try-pop and submits a
- * deferred queue item when the FIFO is empty; the queue worker then
- * calls this to wait.  If \p out_info is non-NULL it is populated with
- * the popped entry's trace fields. */
-int
-npt_context_wait_pop_present_done(struct npt_context *ctx,
-                                  struct npt_pop_info *out_info);
 
 bool
 npt_context_create_resource(struct npt_context *ctx,
@@ -359,8 +298,7 @@ npt_context_lookup_object(struct npt_context *ctx,
                           npt_object_type expected);
 
 /* COM_RELEASE coordination: drop the feedback entry (if any), unmap
- * the object_table entry, then drop the host-library ref — either by
- * destroying the swapchain wrapper that owns it or by a plain
+ * the object_table entry, then drop the host-library ref via
  * IUnknown::Release.  Stray RELEASE on an unregistered id is silent. */
 void
 npt_context_release_object(struct npt_context *ctx, uint64_t guest_id);

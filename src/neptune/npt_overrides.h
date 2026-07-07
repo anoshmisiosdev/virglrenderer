@@ -11,10 +11,6 @@
 /* Non-const because struct npt_dispatch_context expects non-const
  * pointers.  Initialised once at startup, read-only thereafter. */
 extern struct npt_dispatch_toplevel_overrides npt_toplevel_overrides;
-extern struct npt_dispatch_idxgifactory_overrides npt_dxgifactory_overrides;
-extern struct npt_dispatch_idxgifactory2_overrides npt_dxgifactory2_overrides;
-extern struct npt_dispatch_idxgiswapchain_overrides npt_dxgiswapchain_overrides;
-extern struct npt_dispatch_idxgiswapchain1_overrides npt_dxgiswapchain1_overrides;
 
 /* Shared-HANDLE rejection.  Each table sets only the shared-HANDLE
  * methods; default dispatch handles the rest. */

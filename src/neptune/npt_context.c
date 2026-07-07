@@ -21,7 +21,7 @@
 #include "npt_profile.h"
 #include "npt_queue.h"
 #include "npt_ring.h"
-#include "npt_swapchain.h"
+#include "npt_shared.h"
 #include "neptune-protocol/npt_protocol_host_dispatch.h"
 #include "util/anon_file.h"
 #include "util/os_file.h"
@@ -61,10 +61,6 @@ npt_context_ring_monitor_fini(struct npt_context *ctx);
 static void
 npt_resource_free(struct npt_resource *res)
 {
-   if (res->map_state.is_mapped)
-      npt_log("resource %u destroyed while map_state is still active",
-              res->res_id);
-
    switch (res->fd_type) {
    case VIRGL_RESOURCE_FD_SHM:
       if (res->u.data && !res->iov_owned)
@@ -89,9 +85,9 @@ npt_context_free_resource(struct hash_entry *entry)
 }
 
 /* Overrides are set only where the default dispatcher cannot cope:
- * top-level functions (no _self for dlsym to bind against), swapchain
- * virtualization, shared-HANDLE rejection, and feedback lifecycle
- * hooks.  All other dispatch slots stay NULL and fall through. */
+ * top-level functions (no _self for dlsym to bind against),
+ * shared-HANDLE rejection, and feedback lifecycle hooks.  All other
+ * dispatch slots stay NULL and fall through. */
 static void
 npt_context_init_dispatch(struct npt_context *ctx)
 {
@@ -104,10 +100,6 @@ npt_context_init_dispatch(struct npt_context *ctx)
    d->encoder = &ctx->encoder;
 
    d->toplevel_dispatch_overrides = &npt_toplevel_overrides;
-   d->idxgifactory_dispatch_overrides = &npt_dxgifactory_overrides;
-   d->idxgifactory2_dispatch_overrides = &npt_dxgifactory2_overrides;
-   d->idxgiswapchain_dispatch_overrides = &npt_dxgiswapchain_overrides;
-   d->idxgiswapchain1_dispatch_overrides = &npt_dxgiswapchain1_overrides;
    d->idxgiresource_dispatch_overrides = &npt_idxgiresource_overrides;
    d->idxgiresource1_dispatch_overrides = &npt_idxgiresource1_overrides;
    d->id3d11device_dispatch_overrides = &npt_id3d11device_overrides;
@@ -294,17 +286,7 @@ npt_context_release_object(struct npt_context *ctx, uint64_t guest_id)
    if (!obj)
       return;
 
-   /* Swapchain wrappers own the host swapchain's sole ref.  Destroy
-    * fires only on the primary guest_id captured at create time;
-    * QI-derived alias releases just drop the per-alias host ref the
-    * QI dispatcher added.  Without the primary check, an alias's
-    * COM_RELEASE would tear down the swapchain while the primary is
-    * still live. */
-   struct npt_swapchain *sc = npt_swapchain_wrapper_for(obj);
-   if (sc && sc->primary_guest_id == guest_id)
-      npt_swapchain_destroy(sc);
-   else
-      npt_com_release(obj);
+   npt_com_release(obj);
 }
 
 HRESULT
@@ -409,16 +391,6 @@ npt_context_create(uint32_t ctx_id,
    if (mtx_init(&ctx->sync_queues_mutex, mtx_plain) != thrd_success)
       goto err_sync_queues_mutex;
 
-   if (mtx_init(&ctx->present_done_mutex, mtx_plain) != thrd_success)
-      goto err_present_done_mutex;
-   if (cnd_init(&ctx->present_done_cond) != thrd_success) {
-      mtx_destroy(&ctx->present_done_mutex);
-      goto err_present_done_mutex;
-   }
-   list_inithead(&ctx->present_done_fds);
-   ctx->present_done_count = 0u;
-   ctx->present_done_shutting_down = false;
-
    if (!npt_event_init(ctx))
       goto err_event;
 
@@ -456,9 +428,6 @@ err_object_table:
 err_object_mutex:
    npt_event_fini(ctx);
 err_event:
-   cnd_destroy(&ctx->present_done_cond);
-   mtx_destroy(&ctx->present_done_mutex);
-err_present_done_mutex:
    mtx_destroy(&ctx->sync_queues_mutex);
 err_sync_queues_mutex:
    _mesa_hash_table_destroy(ctx->pending_blob_table, NULL);
@@ -504,23 +473,6 @@ npt_context_destroy(struct npt_context *ctx)
    }
    mtx_destroy(&ctx->sync_queues_mutex);
 
-   /* Unblock any worker parked in pop_present_done on a push that
-    * will never come; broadcast lets it observe shutting_down. */
-   mtx_lock(&ctx->present_done_mutex);
-   ctx->present_done_shutting_down = true;
-   cnd_broadcast(&ctx->present_done_cond);
-   mtx_unlock(&ctx->present_done_mutex);
-
-   list_for_each_entry_safe (struct npt_present_done_entry, e,
-                             &ctx->present_done_fds, head) {
-      list_del(&e->head);
-      if (e->sync_fd >= 0)
-         close(e->sync_fd);
-      free(e);
-   }
-   cnd_destroy(&ctx->present_done_cond);
-   mtx_destroy(&ctx->present_done_mutex);
-
    npt_event_fini(ctx);
 
    /* Guests are expected to release every COM object before context
@@ -538,6 +490,11 @@ npt_context_destroy(struct npt_context *ctx)
 
    _mesa_hash_table_destroy(ctx->resource_table, npt_context_free_resource);
    mtx_destroy(&ctx->resource_mutex);
+
+   if (ctx->sync_maps.count)
+      npt_log("context destroyed with %u sync map(s) still active",
+              ctx->sync_maps.count);
+   free(ctx->sync_maps.entries);
 
    hash_table_foreach(ctx->pending_blob_table, entry) {
       struct npt_pending_blob *pb = entry->data;
@@ -816,163 +773,6 @@ npt_context_submit_cmd(struct npt_context *ctx, const void *buffer, size_t size)
    return true;
 }
 
-void
-npt_context_push_present_done(struct npt_context *ctx, int sync_fd,
-                              uint32_t image_index, uint64_t frame_id)
-{
-   if (!ctx) {
-      if (sync_fd >= 0)
-         close(sync_fd);
-      return;
-   }
-
-   struct npt_present_done_entry *entry = malloc(sizeof(*entry));
-   if (!entry) {
-      if (sync_fd >= 0)
-         close(sync_fd);
-      return;
-   }
-   entry->sync_fd = sync_fd;
-
-   /* Trace fields are only consumed by the FENCE_TRACE-gated log line.
-    * Skip the clock_gettime + atomic on the hot path when off. */
-   const bool trace = NPT_DEBUG(FENCE_TRACE);
-   if (trace) {
-      entry->image_index = image_index;
-      entry->frame_id    = frame_id;
-      entry->push_t_ns   = npt_profile_now_ns();
-      entry->push_seq    =
-         atomic_fetch_add_explicit(&ctx->present_done_push_seq, 1,
-                                   memory_order_relaxed) + 1;
-   }
-
-   mtx_lock(&ctx->present_done_mutex);
-
-   /* Steady-state depth is 0 or 1.  Cap is a fail-safe for a guest
-    * that stops consuming GPU-done events: drop oldest first so the
-    * freshest events stay queued. */
-   unsigned evicted = 0;
-   while (ctx->present_done_count >= NPT_PRESENT_DONE_FIFO_MAX
-       && !list_is_empty(&ctx->present_done_fds)) {
-      struct npt_present_done_entry *oldest =
-         list_first_entry(&ctx->present_done_fds,
-                          struct npt_present_done_entry, head);
-      list_del(&oldest->head);
-      ctx->present_done_count--;
-      if (oldest->sync_fd >= 0)
-         close(oldest->sync_fd);
-      free(oldest);
-      evicted++;
-   }
-   if (evicted)
-      npt_log("present-done FIFO overflow: evicted %u oldest entr%s "
-              "(cap=%u). Guest is not consuming GPU-done events.",
-              evicted, evicted == 1 ? "y" : "ies",
-              (unsigned)NPT_PRESENT_DONE_FIFO_MAX);
-
-   list_addtail(&entry->head, &ctx->present_done_fds);
-   ctx->present_done_count++;
-   const uint32_t depth_after = ctx->present_done_count;
-
-   /* Wake any submit_fence parked in pop_present_done. */
-   cnd_broadcast(&ctx->present_done_cond);
-   mtx_unlock(&ctx->present_done_mutex);
-
-   if (trace)
-      npt_profile_log_pd_push(ctx->ctx_id, entry->push_seq, frame_id,
-                              image_index, sync_fd, entry->push_t_ns,
-                              depth_after);
-}
-
-/* Non-blocking pop; caller owns the returned fd, or -1 if empty.
- * Called from the proxy dispatch thread, which MUST NOT block: QEMU's
- * main loop holds the BQL while waiting for the reply, and any stall
- * here freezes every vCPU on MMIO.  If \p out_info is non-NULL it is
- * populated with the popped entry's fence_trace fields. */
-static int
-npt_context_try_pop_present_done(struct npt_context *ctx,
-                                 struct npt_pop_info *out_info)
-{
-   int fd = -1;
-   /* out_info is populated only when the caller will log it, which is
-    * itself gated on FENCE_TRACE; skip clock_gettime when off. */
-   const bool fill_info = out_info && NPT_DEBUG(FENCE_TRACE);
-   const uint64_t pop_enter_t_ns = fill_info ? npt_profile_now_ns() : 0;
-
-   mtx_lock(&ctx->present_done_mutex);
-   if (!list_is_empty(&ctx->present_done_fds)) {
-      struct npt_present_done_entry *entry =
-         list_first_entry(&ctx->present_done_fds,
-                          struct npt_present_done_entry, head);
-      list_del(&entry->head);
-      ctx->present_done_count--;
-      fd = entry->sync_fd;
-      if (fill_info) {
-         const uint64_t pop_t_ns = npt_profile_now_ns();
-         out_info->push_seq    = entry->push_seq;
-         out_info->frame_id    = entry->frame_id;
-         out_info->image_index = entry->image_index;
-         out_info->push_to_pop_us =
-            (pop_t_ns > entry->push_t_ns)
-               ? (pop_t_ns - entry->push_t_ns) / 1000ull : 0;
-         out_info->pop_block_us =
-            (pop_t_ns > pop_enter_t_ns)
-               ? (pop_t_ns - pop_enter_t_ns) / 1000ull : 0;
-      }
-      free(entry);
-   }
-   mtx_unlock(&ctx->present_done_mutex);
-
-   return fd;
-}
-
-/* Blocking pop.  Caller owns the returned fd; -1 only on context
- * shutdown.  Must run on the npt_queue_thread (or any non-BQL-
- * holding thread).  1:1 pairing with the guest's per-frame index
- * holds because deferred queue items are appended in submit_fence
- * order, the worker drains them in order, and the host swapchain
- * backend pushes present-done fds in submit order. */
-int
-npt_context_wait_pop_present_done(struct npt_context *ctx,
-                                  struct npt_pop_info *out_info)
-{
-   int fd = -1;
-   const bool fill_info = out_info && NPT_DEBUG(FENCE_TRACE);
-   const uint64_t pop_enter_t_ns = fill_info ? npt_profile_now_ns() : 0;
-
-   mtx_lock(&ctx->present_done_mutex);
-
-   while (list_is_empty(&ctx->present_done_fds)
-       && !ctx->present_done_shutting_down) {
-      cnd_wait(&ctx->present_done_cond, &ctx->present_done_mutex);
-   }
-
-   if (!list_is_empty(&ctx->present_done_fds)) {
-      struct npt_present_done_entry *entry =
-         list_first_entry(&ctx->present_done_fds,
-                          struct npt_present_done_entry, head);
-      list_del(&entry->head);
-      ctx->present_done_count--;
-      fd = entry->sync_fd;
-      if (fill_info) {
-         const uint64_t pop_t_ns = npt_profile_now_ns();
-         out_info->push_seq    = entry->push_seq;
-         out_info->frame_id    = entry->frame_id;
-         out_info->image_index = entry->image_index;
-         out_info->push_to_pop_us =
-            (pop_t_ns > entry->push_t_ns)
-               ? (pop_t_ns - entry->push_t_ns) / 1000ull : 0;
-         out_info->pop_block_us =
-            (pop_t_ns > pop_enter_t_ns)
-               ? (pop_t_ns - pop_enter_t_ns) / 1000ull : 0;
-      }
-      free(entry);
-   }
-   mtx_unlock(&ctx->present_done_mutex);
-
-   return fd;
-}
-
 bool
 npt_context_submit_fence(struct npt_context *ctx,
                          uint32_t flags,
@@ -988,6 +788,13 @@ npt_context_submit_fence(struct npt_context *ctx,
    if (ring_idx >= ARRAY_SIZE(ctx->sync_queues)) {
       npt_log("submit_fence: invalid ring_idx %u", ring_idx);
       return false;
+   }
+
+   /* Non-event rings (below NPT_EVENT_RING_BASE) carry no wait source;
+    * retire on the CPU timeline. */
+   if (ring_idx < NPT_EVENT_RING_BASE) {
+      ctx->retire_fence(ctx->ctx_id, ring_idx, fence_id);
+      return true;
    }
 
    /* No vkGetDeviceQueue2 equivalent: create the sync queue on
@@ -1007,29 +814,12 @@ npt_context_submit_fence(struct npt_context *ctx,
    mtx_unlock(&ctx->sync_queues_mutex);
 
    /* Event rings: a pending ARM_EVENT_FENCE owes us the proxy
-    * eventfd to wait on.  Present rings: the host swapchain's
-    * onPresentSubmitted owes us a GPU-done sync_fd. */
+    * eventfd to wait on. */
    int sync_fd = npt_event_pop_pending_arm(ctx, ring_idx, fence_id);
-   bool defer_present_pop = false;
-   if (sync_fd < 0 && ring_idx < NPT_EVENT_RING_BASE) {
-      /* Try a non-blocking pop; if the FIFO already has the matching
-       * fd, ship it synchronously in the proxy reply.  Empty FIFO
-       * means onPresentSubmitted has not arrived yet — defer the pop
-       * to the per-ring queue worker so the dispatch reply can return
-       * and release QEMU's BQL.  1:1 pairing holds because the worker
-       * drains its sync list in submit order. */
-      struct npt_pop_info pop_info;
-      sync_fd = npt_context_try_pop_present_done(ctx, &pop_info);
-      if (sync_fd < 0)
-         defer_present_pop = true;
-      else if (NPT_DEBUG(FENCE_TRACE))
-         npt_profile_log_pd_pop(ctx->ctx_id, &pop_info, sync_fd,
-                                ring_idx, fence_id, "try");
-   }
 
-   /* No fd available and none owed: event-range pending_arm missed
-    * (rare race) or the context is tearing down. */
-   if (sync_fd < 0 && !defer_present_pop) {
+   /* No fd owed: pending_arm missed (rare race) or the context is
+    * tearing down. */
+   if (sync_fd < 0) {
       ctx->retire_fence(ctx->ctx_id, ring_idx, fence_id);
       return true;
    }
@@ -1037,25 +827,19 @@ npt_context_submit_fence(struct npt_context *ctx,
    /* Register so render_context_dispatch_submit_fence can retrieve it
     * via virgl_renderer_get_fence_fd and pass it via SCM_RIGHTS to
     * the proxy.  virgl_fence_set_fd dups internally, so we still own
-    * sync_fd here.  Skipped on the deferred path: by the time the
-    * worker resolves the fd the proxy reply has already shipped, so
-    * the guest sees no per-fence fd and instead consumes the fence
-    * through retire_fence.
+    * sync_fd here.
     *
     * Key by the fence's (ring_idx, fence_id) identity: the guest's
     * seqno is per-ring and repeats across the event rings, so the
     * render-server table keys by the full pair, matching the lookup in
     * render_context_dispatch_submit_fence. */
-   if (sync_fd >= 0) {
-      int err = virgl_fence_set_fd(virgl_fence_ring_key(ring_idx, fence_id),
-                                   sync_fd);
-      if (err)
-         npt_log("submit_fence: virgl_fence_set_fd(ring=%u, id=%" PRIu64 ") "
-                 "failed (err=%d)", ring_idx, fence_id, err);
-   }
+   int err = virgl_fence_set_fd(virgl_fence_ring_key(ring_idx, fence_id),
+                                sync_fd);
+   if (err)
+      npt_log("submit_fence: virgl_fence_set_fd(ring=%u, id=%" PRIu64 ") "
+              "failed (err=%d)", ring_idx, fence_id, err);
 
-   return npt_queue_sync_submit(queue, flags, ring_idx, fence_id,
-                                 sync_fd, defer_present_pop);
+   return npt_queue_sync_submit(queue, flags, ring_idx, fence_id, sync_fd);
 }
 
 bool
@@ -1110,8 +894,8 @@ npt_context_create_resource(struct npt_context *ctx,
 
       return true;
    } else {
-      /* Server-created blob (e.g. swapchain dmabuf image) registered
-       * earlier via submit_cmd. */
+      /* Server-created blob (a shared texture's dmabuf export) staged
+       * earlier by EXPORT_BLOB. */
       mtx_lock(&ctx->pending_blob_mutex);
       struct hash_entry *entry =
          _mesa_hash_table_search(ctx->pending_blob_table, &blob_id);
@@ -1122,6 +906,18 @@ npt_context_create_resource(struct npt_context *ctx,
 
       if (!pb)
          return false;
+
+      /* Record the binding in the resource table too, so a same-
+       * context SHARED_OPEN_RES on this res_id resolves without an
+       * attach round-trip (attach is deduped for the creating
+       * context).  The table owns its own dup. */
+      if (pb->fd_type == VIRGL_RESOURCE_FD_DMABUF) {
+         int table_fd = dup(pb->fd);
+         if (table_fd >= 0 &&
+             !npt_context_import_resource(ctx, res_id, pb->fd_type,
+                                          table_fd, pb->size))
+            close(table_fd);
+      }
 
       *out_blob = (struct virgl_context_blob){
          .type = pb->fd_type,
@@ -1253,7 +1049,6 @@ npt_context_destroy_resource(struct npt_context *ctx, uint32_t res_id)
    mtx_unlock(&ctx->ring_mutex);
 
    list_for_each_entry_safe (struct npt_ring, ring, &doomed, head) {
-      list_del(&ring->head);
       npt_ring_stop(ring);
       npt_ring_destroy(ring);
    }

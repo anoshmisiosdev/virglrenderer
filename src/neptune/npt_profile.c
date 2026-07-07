@@ -177,33 +177,6 @@ npt_profile_dump(const char *reason)
 }
 
 void
-npt_profile_log_pd_push(uint32_t ctx_id, uint64_t push_seq,
-                        uint64_t frame_id, uint32_t image_index,
-                        int sync_fd, uint64_t push_t_ns, uint32_t depth)
-{
-   npt_log("NPT-PD-PUSH ctx=%u push_seq=%" PRIu64
-           " frame_id=%" PRIu64 " image_idx=%u sync_fd=%d"
-           " push_ns=%" PRIu64 " depth=%u",
-           ctx_id, push_seq, frame_id, image_index, sync_fd,
-           push_t_ns, depth);
-}
-
-void
-npt_profile_log_pd_pop(uint32_t ctx_id, const struct npt_pop_info *info,
-                       int sync_fd, uint32_t ring_idx, uint64_t fence_id,
-                       const char *source)
-{
-   npt_log("NPT-PD-POP ctx=%u push_seq=%" PRIu64
-           " frame_id=%" PRIu64 " image_idx=%u sync_fd=%d"
-           " ring_idx=%u fence_id=%" PRIu64
-           " push_to_pop_us=%" PRIu64 " pop_block_us=%" PRIu64
-           " source=%s",
-           ctx_id, info->push_seq, info->frame_id, info->image_index,
-           sync_fd, ring_idx, fence_id,
-           info->push_to_pop_us, info->pop_block_us, source);
-}
-
-void
 npt_profile_log_q_retire(uint32_t ring_idx, uint64_t fence_id,
                          int sync_fd, uint64_t poll_us, int rc)
 {

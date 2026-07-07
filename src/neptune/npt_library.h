@@ -20,7 +20,6 @@ struct npt_d3d_library {
    void *d3d12_module;
 
    PFN_D3D11CreateDevice pfn_D3D11CreateDevice;
-   PFN_D3D11CreateDeviceAndSwapChain pfn_D3D11CreateDeviceAndSwapChain;
    PFN_D3D11On12CreateDevice pfn_D3D11On12CreateDevice;
 
    PFN_CreateDXGIFactory1 pfn_CreateDXGIFactory1;

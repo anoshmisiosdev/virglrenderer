@@ -26,8 +26,7 @@ static struct npt_queue_sync *
 npt_queue_alloc_sync(uint32_t flags,
                      uint32_t ring_idx,
                      uint64_t fence_id,
-                     int sync_fd,
-                     bool deferred_present_pop)
+                     int sync_fd)
 {
    struct npt_queue_sync *sync = malloc(sizeof(*sync));
    if (!sync)
@@ -37,7 +36,6 @@ npt_queue_alloc_sync(uint32_t flags,
    sync->flags    = flags;
    sync->ring_idx = ring_idx;
    sync->fence_id = fence_id;
-   sync->deferred_present_pop = deferred_present_pop;
    sync->timeouts = 0;
 
    return sync;
@@ -68,12 +66,10 @@ npt_queue_sync_submit(struct npt_queue *queue,
                       uint32_t flags,
                       uint32_t ring_idx,
                       uint64_t fence_id,
-                      int sync_fd,
-                      bool deferred_present_pop)
+                      int sync_fd)
 {
    struct npt_queue_sync *sync =
-      npt_queue_alloc_sync(flags, ring_idx, fence_id, sync_fd,
-                           deferred_present_pop);
+      npt_queue_alloc_sync(flags, ring_idx, fence_id, sync_fd);
    if (!sync) {
       if (sync_fd >= 0)
          close(sync_fd);
@@ -107,9 +103,9 @@ npt_wait_sync_fd(int fd, int timeout_ms)
 
    /* Treat POLLNVAL / POLLERR / POLLHUP and any other error as a
     * signal so the worker retires the fence rather than re-polling a
-    * dead fd forever.  The swapchain wrapper can race close() of a
-    * release fd against a poll already in flight; the sync queue is
-    * that fd's only downstream and must not wedge. */
+    * dead fd forever.  A concurrent close() of the sync fd can race a
+    * poll already in flight; the sync queue is that fd's only
+    * downstream and must not wedge. */
    if (ret > 0 && (pfd.revents & (POLLNVAL | POLLERR | POLLHUP)))
       return 1;
    if (ret < 0)
@@ -148,24 +144,6 @@ npt_queue_thread(void *arg)
          list_first_entry(&queue->sync_thread.syncs, struct npt_queue_sync, head);
 
       mtx_unlock(&queue->sync_thread.mutex);
-
-      /* Deferred entries wait here for the matching push from the
-       * host swapchain's onPresentSubmitted callback before polling.
-       * Performing this wait off the proxy dispatch thread keeps
-       * QEMU's BQL released across the race window; 1:1 pairing with
-       * the guest's per-frame index holds because the dispatch
-       * thread enqueues in submit order, this worker drains in
-       * arrival order, and the swapchain pushes fds in submit order. */
-      if (sync->deferred_present_pop && sync->sync_fd < 0) {
-         struct npt_pop_info pop_info;
-         sync->sync_fd =
-            npt_context_wait_pop_present_done(queue->context, &pop_info);
-         sync->deferred_present_pop = false;
-         if (sync->sync_fd >= 0 && NPT_DEBUG(FENCE_TRACE))
-            npt_profile_log_pd_pop(queue->context->ctx_id, &pop_info,
-                                   sync->sync_fd, queue->ring_idx,
-                                   sync->fence_id, "wait");
-      }
 
       struct timespec t0, t1;
       const bool trace = NPT_DEBUG(FENCE_TRACE);

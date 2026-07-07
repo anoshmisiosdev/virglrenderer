@@ -66,34 +66,6 @@ void npt_profile_dump(const char *reason);
 void npt_profile_register_ring(struct npt_ring *ring);
 void npt_profile_unregister_ring(struct npt_ring *ring);
 
-/* Per-(push, pop) pair info populated by the pop helpers under
- * NPT_DEBUG=fence_trace and handed to npt_profile_log_pd_pop so the
- * trace line can join push and pop in one log entry with the
- * fence_id the pop is being matched against. */
-struct npt_pop_info {
-   uint64_t push_seq;
-   uint64_t frame_id;
-   uint32_t image_index;
-   uint64_t push_to_pop_us;
-   uint64_t pop_block_us;
-};
-
-/* Emit one NPT-PD-PUSH line per onPresentSubmitted push.  push_t_ns
- * is the CLOCK_MONOTONIC ns timestamp stamped on the entry at push
- * time; depth is the FIFO depth after insertion. */
-void npt_profile_log_pd_push(uint32_t ctx_id, uint64_t push_seq,
-                             uint64_t frame_id, uint32_t image_index,
-                             int sync_fd, uint64_t push_t_ns,
-                             uint32_t depth);
-
-/* Emit one NPT-PD-POP line per pop.  source distinguishes the two
- * pop paths: "try" = submit_fence's non-blocking pop, "wait" = the
- * queue worker's blocking pop after a deferred submit_fence. */
-void npt_profile_log_pd_pop(uint32_t ctx_id,
-                            const struct npt_pop_info *info,
-                            int sync_fd, uint32_t ring_idx,
-                            uint64_t fence_id, const char *source);
-
 /* Emit one NPT-Q-RETIRE line per fence the queue worker retires.
  * poll_us is the wall-time spent in npt_wait_sync_fd; rc is its
  * return code (>0 signalled, 0 timeout, <0 error). */
