@@ -26,14 +26,6 @@ struct npt_queue_sync {
    uint32_t ring_idx;
    uint64_t fence_id;
 
-   /* sync_fd starts -1 and is resolved by the worker via
-    * npt_context_wait_pop_present_done before polling.  Keeps the
-    * blocking wait off the proxy dispatch thread (which holds QEMU's
-    * BQL across the reply); the cost is that the reply does not
-    * carry the per-fence fd back to the guest.  Cleared once the
-    * worker has an fd. */
-   bool deferred_present_pop;
-
    /* Bumped on each poll(sync_fd) timeout; once it crosses a
     * threshold the worker retires as device-lost rather than spin. */
    unsigned timeouts;
@@ -67,7 +59,6 @@ npt_queue_sync_submit(struct npt_queue *queue,
                       uint32_t flags,
                       uint32_t ring_idx,
                       uint64_t fence_id,
-                      int sync_fd,
-                      bool deferred_present_pop);
+                      int sync_fd);
 
 #endif /* NPT_QUEUE_H */

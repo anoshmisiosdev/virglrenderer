@@ -51,12 +51,9 @@ typedef uint64_t npt_object_id;
 
 enum npt_debug_flags {
    NPT_DEBUG_PROFILE     = 1 << 0,
-   /* Per-frame trace of the present-done FIFO + per-ring sync queue.
-    * Logs one NPT-PD-PUSH line per onPresentSubmitted, one NPT-PD-POP
-    * per submit_fence pop (with push_to_pop wait_us), and one
-    * NPT-Q-RETIRE per queue worker poll completion (with the actual
-    * poll_us).  Used to attribute guest-side wsi_us stalls to (a) host
-    * push lateness, (b) real GPU work, or (c) virtio fence propagation. */
+   /* Per-ring sync-queue trace: one NPT-Q-RETIRE line per queue worker
+    * poll completion (with the actual poll_us).  Attributes guest-side
+    * wsi_us stalls to real GPU work vs virtio fence propagation. */
    NPT_DEBUG_FENCE_TRACE = 1 << 1,
 };
 

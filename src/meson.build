@@ -120,13 +120,10 @@ neptune_sources = [
    'neptune/npt_queue.c',
    'neptune/npt_renderer.c',
    'neptune/npt_resource.c',
+   'neptune/npt_shared.c',
    'neptune/npt_ring.c',
-   'neptune/npt_swapchain.c',
-   'neptune/npt_swapchain_dmabuf.c',
    'neptune/npt_dispatch.c',
    'neptune/npt_overrides_toplevel.c',
-   'neptune/npt_overrides_dxgi_factory.c',
-   'neptune/npt_overrides_dxgi_swapchain.c',
    'neptune/npt_overrides_shared_handle.c',
 ]
 
@@ -245,11 +242,11 @@ if with_neptune
    # so the renderer must not gain a NEEDED entry on libdxvk_*.
    dxvk_dep = dependency('dxvk-dxgi').partial_dependency(
       compile_args : true, includes : true)
-   # The dmabuf headless contract is a fork-only extension; bail early
-   # rather than fail to compile a Neptune source file.
-   if not cc.has_header('dxvk_dmabuf.h', dependencies : dxvk_dep)
-      error('Neptune requires the dxvk with dmabuf-presenter; ' +
-            'dxvk_dmabuf.h not found via dxvk-dxgi pkg-config.')
+   # The shared-resource descriptor contract is a fork-only extension;
+   # bail early rather than fail to compile a Neptune source file.
+   if not cc.has_header('dxvk_shared_resource.h', dependencies : dxvk_dep)
+      error('Neptune requires the dxvk with shared-resource descriptors; ' +
+            'dxvk_shared_resource.h not found via dxvk-dxgi pkg-config.')
    endif
    virgl_depends += [dxvk_dep]
 endif

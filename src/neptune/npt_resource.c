@@ -5,12 +5,13 @@
  * D3D11 resource manipulation for the RESOURCE_{UPDATE, MAP, UNMAP}
  * transport commands.  Resolves host resources via the object table,
  * walks the COM vtable for D3D11 Map/Unmap/Update, and (for MAP)
- * stashes per-resource map_state on the SHM blob so the matching
+ * stashes sync-map state per (resource, subresource) so the matching
  * UNMAP can write back.
  */
 
 #include "npt_resource.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "npt_com.h"
@@ -105,6 +106,43 @@ npt_access_flags_to_d3d11_map(uint32_t access_flags)
    return (D3D11_MAP)0;
 }
 
+/* ---- per-context sync-map bookkeeping --------------------------------- */
+
+static struct npt_sync_map_entry *
+npt_sync_map_find(struct npt_context *ctx, uint64_t resource_id,
+                  uint32_t subresource)
+{
+   for (uint32_t i = 0; i < ctx->sync_maps.count; ++i) {
+      struct npt_sync_map_entry *e = &ctx->sync_maps.entries[i];
+      if (e->resource_id == resource_id && e->subresource == subresource)
+         return e;
+   }
+   return NULL;
+}
+
+static struct npt_sync_map_entry *
+npt_sync_map_add(struct npt_context *ctx)
+{
+   if (ctx->sync_maps.count == ctx->sync_maps.cap) {
+      uint32_t cap = ctx->sync_maps.cap ? ctx->sync_maps.cap * 2 : 8;
+      struct npt_sync_map_entry *e =
+         realloc(ctx->sync_maps.entries, cap * sizeof(*e));
+      if (!e)
+         return NULL;
+      ctx->sync_maps.entries = e;
+      ctx->sync_maps.cap = cap;
+   }
+   return &ctx->sync_maps.entries[ctx->sync_maps.count++];
+}
+
+static void
+npt_sync_map_remove(struct npt_context *ctx, struct npt_sync_map_entry *e)
+{
+   uint32_t idx = (uint32_t)(e - ctx->sync_maps.entries);
+   ctx->sync_maps.entries[idx] =
+      ctx->sync_maps.entries[--ctx->sync_maps.count];
+}
+
 HRESULT
 npt_resource_map(struct npt_context *ctx,
                  uint64_t context_id, uint64_t resource_id,
@@ -114,6 +152,7 @@ npt_resource_map(struct npt_context *ctx,
                  UNUSED uint64_t read_range_end,
                  uint64_t byte_size,
                  uint32_t mip_height, uint32_t mip_depth,
+                 uint32_t shmem_offset,
                  uint32_t *out_row_pitch, uint32_t *out_depth_pitch,
                  uint32_t *out_mapped_size)
 {
@@ -133,6 +172,12 @@ npt_resource_map(struct npt_context *ctx,
    if (!shmem_res || shmem_res->fd_type != VIRGL_RESOURCE_FD_SHM ||
        !shmem_res->u.data) {
       npt_log("map_resource: invalid SHM resource %u", shmem_res_id);
+      return NPT_E_FAIL;
+   }
+
+   if ((uint64_t)shmem_offset >= shmem_res->size) {
+      npt_log("map_resource: shmem_offset %u exceeds shmem size %zu",
+              shmem_offset, shmem_res->size);
       return NPT_E_FAIL;
    }
 
@@ -179,22 +224,36 @@ npt_resource_map(struct npt_context *ctx,
               (uint64_t)mip_height *
               (uint64_t)mip_depth;
    } else {
-      bound = byte_size ? byte_size : shmem_res->size;
+      bound = byte_size ? byte_size : shmem_res->size - shmem_offset;
    }
-   if (bound > shmem_res->size)
-      bound = shmem_res->size;
+   if (bound > shmem_res->size - shmem_offset)
+      bound = shmem_res->size - shmem_offset;
    const uint32_t mapped_size = (uint32_t)bound;
 
    if (access_flags & NPT_MAP_ACCESS_READ)
-      memcpy(shmem_res->u.data, mapped.pData, mapped_size);
+      memcpy((uint8_t *)shmem_res->u.data + shmem_offset, mapped.pData,
+             mapped_size);
 
-   shmem_res->map_state = (struct npt_resource_map_state){
-      .mapped_data  = mapped.pData,
-      .row_pitch    = mapped.RowPitch,
-      .depth_pitch  = mapped.DepthPitch,
-      .mapped_size  = mapped_size,
+   struct npt_sync_map_entry *entry =
+      npt_sync_map_find(ctx, resource_id, subresource);
+   if (entry) {
+      /* Double-map of the same subresource: D3D11 disallows it, so
+       * this indicates guest state drift; replace the stale entry. */
+      npt_log("map_resource: resource 0x%" PRIx64 " sub %u already "
+              "mapped, replacing stale entry", resource_id, subresource);
+   } else {
+      entry = npt_sync_map_add(ctx);
+      if (!entry) {
+         npt_log("map_resource: sync map table OOM");
+         return NPT_E_OUTOFMEMORY;
+      }
+   }
+   *entry = (struct npt_sync_map_entry){
+      .resource_id  = resource_id,
+      .subresource  = subresource,
       .access_flags = access_flags,
-      .is_mapped    = true,
+      .mapped_data  = mapped.pData,
+      .mapped_size  = mapped_size,
       .persistent   = !!(access_flags & NPT_MAP_ACCESS_PERSISTENT),
    };
 
@@ -287,27 +346,28 @@ npt_resource_unmap(struct npt_context *ctx,
    }
 
    /* Paired with a prior MAP_RESOURCE. */
-   if (!shmem_res->map_state.is_mapped) {
-      npt_log("unmap_resource: SHM resource %u not mapped",
-              shmem_res_id);
+   struct npt_sync_map_entry *entry =
+      npt_sync_map_find(ctx, resource_id, subresource);
+   if (!entry) {
+      npt_log("unmap_resource: resource 0x%" PRIx64 " sub %u not mapped",
+              resource_id, subresource);
       return NPT_E_FAIL;
    }
 
-   if (shmem_res->map_state.persistent) {
-      npt_log("unmap_resource: SHM resource %u is persistent, "
-              "ignoring unmap", shmem_res_id);
+   if (entry->persistent) {
+      npt_log("unmap_resource: resource 0x%" PRIx64 " is persistent, "
+              "ignoring unmap", resource_id);
       return NPT_E_FAIL;
    }
 
-   if (shmem_res->map_state.access_flags & NPT_MAP_ACCESS_WRITE) {
+   if (entry->access_flags & NPT_MAP_ACCESS_WRITE) {
       /* MIN(guest byte_size, recorded mapped_size) so we don't
        * overrun the D3D region with stale/padded SHM bytes.  0 means
        * "use the full mapped_size". */
-      uint64_t bound = byte_size ? byte_size
-                                 : shmem_res->map_state.mapped_size;
-      if (bound > shmem_res->map_state.mapped_size)
-         bound = shmem_res->map_state.mapped_size;
-      memcpy(shmem_res->map_state.mapped_data, slot_src, (size_t)bound);
+      uint64_t bound = byte_size ? byte_size : entry->mapped_size;
+      if (bound > entry->mapped_size)
+         bound = entry->mapped_size;
+      memcpy(entry->mapped_data, slot_src, (size_t)bound);
    }
 
    if (!context_id) {
@@ -324,7 +384,6 @@ npt_resource_unmap(struct npt_context *ctx,
                         NPT_VTBL_ID3D11DeviceContext_Unmap);
    unmap_fn(imm_ctx, resource, subresource);
 
-   shmem_res->map_state.is_mapped = false;
-   shmem_res->map_state.mapped_data = NULL;
+   npt_sync_map_remove(ctx, entry);
    return NPT_S_OK;
 }

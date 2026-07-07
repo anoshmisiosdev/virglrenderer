@@ -12,7 +12,6 @@
 #include "npt_library.h"
 #include "npt_overrides.h"
 #include "npt_renderer.h"
-#include "npt_swapchain.h"
 
 #include "neptune-protocol/npt_protocol_host_toplevel.h"
 
@@ -95,48 +94,6 @@ npt_override_D3D11CreateDevice(UNUSED struct npt_dispatch_context *dctx,
       args->ppDevice,
       args->pFeatureLevel,
       args->ppImmediateContext);
-   return args->ret;
-}
-
-static HRESULT
-npt_override_D3D11CreateDeviceAndSwapChain(struct npt_dispatch_context *dctx,
-                                           struct npt_command_D3D11CreateDeviceAndSwapChain *args)
-{
-   struct npt_d3d_library *lib = npt_renderer_get_library();
-   if (!lib || !lib->pfn_D3D11CreateDevice) {
-      args->ret = NPT_E_FAIL;
-      return args->ret;
-   }
-
-   args->ret = lib->pfn_D3D11CreateDevice(
-      args->pAdapter, args->DriverType, 0, args->Flags,
-      args->pFeatureLevels, args->FeatureLevels, args->SDKVersion,
-      args->ppDevice, args->pFeatureLevel,
-      args->ppImmediateContext);
-
-   if (args->ppSwapChain)
-      *args->ppSwapChain = NULL;
-
-   if (NPT_FAILED(args->ret) || !args->ppDevice || !*args->ppDevice ||
-       !args->pSwapChainDesc || !args->ppSwapChain)
-      return args->ret;
-
-   const DXGI_SWAP_CHAIN_DESC *desc = args->pSwapChainDesc;
-   struct npt_swapchain *sc =
-      npt_swapchain_create(npt_context_from_dispatch(dctx),
-                            *args->ppDevice, NULL,
-                            desc->BufferDesc.Width,
-                            desc->BufferDesc.Height,
-                            desc->BufferDesc.Format,
-                            desc->BufferCount);
-   if (sc) {
-      sc->primary_guest_id = args->_guest_id_ppSwapChain;
-      sc->guest_hwnd = (void *)(uintptr_t)desc->OutputWindow;
-      sc->guest_flags = desc->Flags;
-      sc->guest_swap_effect = desc->SwapEffect;
-      sc->guest_windowed = desc->Windowed;
-      *args->ppSwapChain = (IDXGISwapChain *)sc->dxgi_swapchain;
-   }
    return args->ret;
 }
 
@@ -239,7 +196,6 @@ struct npt_dispatch_toplevel_overrides npt_toplevel_overrides = {
    .CreateDXGIFactory2                             = npt_override_CreateDXGIFactory2,
    .DXGIDeclareAdapterRemovalSupport               = npt_override_DXGIDeclareAdapterRemovalSupport,
    .D3D11CreateDevice                              = npt_override_D3D11CreateDevice,
-   .D3D11CreateDeviceAndSwapChain                  = npt_override_D3D11CreateDeviceAndSwapChain,
    .D3D11On12CreateDevice                          = npt_override_D3D11On12CreateDevice,
    .D3D12CreateDevice                              = npt_override_D3D12CreateDevice,
    .D3D12CreateRootSignatureDeserializer           = npt_override_D3D12CreateRootSignatureDeserializer,

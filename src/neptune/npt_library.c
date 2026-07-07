@@ -60,11 +60,9 @@ npt_library_init(struct npt_d3d_library *lib)
    memset(lib, 0, sizeof(*lib));
 
 #ifdef HAVE_DLFCN_H
-   /* The swapchain wrapper requires the host D3D11/DXGI library's
-    * dmabuf WSI backend, selected by DXVK_WSI_DRIVER=Dmabuf.  Flag 0
-    * preserves a user-set value.  No-op for libraries that don't
-    * honour this variable. */
-   setenv("DXVK_WSI_DRIVER", "Dmabuf", 0);
+   /* Headless operation requires the host D3D11/DXGI library's
+    * headless WSI backend. */
+   setenv("DXVK_WSI_DRIVER", "Headless", 0);
 
    lib->d3d11_module = npt_library_open("NPT_D3D11_LIBRARY_PATH",
                                          NPT_D3D11_LIBRARY_DEFAULT);
@@ -79,11 +77,6 @@ npt_library_init(struct npt_d3d_library *lib)
          lib->d3d11_module = NULL;
       } else {
          /* Optional. */
-         lib->pfn_D3D11CreateDeviceAndSwapChain =
-            ((union { void *p; PFN_D3D11CreateDeviceAndSwapChain f; }){
-               .p = npt_library_sym(lib->d3d11_module,
-                                    "D3D11CreateDeviceAndSwapChain")
-            }).f;
          lib->pfn_D3D11On12CreateDevice =
             ((union { void *p; PFN_D3D11On12CreateDevice f; }){
                .p = npt_library_sym(lib->d3d11_module,
