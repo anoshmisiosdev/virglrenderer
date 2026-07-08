@@ -24,6 +24,7 @@ proxy_client_reset(struct proxy_client *client);
 bool
 proxy_client_create_context(struct proxy_client *client,
                             uint32_t ctx_id,
+                            uint32_t capset_id,
                             size_t ctx_name_len,
                             const char *ctx_name,
                             int *out_ctx_fd);
