@@ -443,12 +443,14 @@ render_worker_jail_detach_workers(struct render_worker_jail *jail)
 #if defined(ENABLE_RENDER_SERVER_WORKER_PROCESS) && defined(__APPLE__)
 
 #include <crt_externs.h>
+#include <mach/machine.h>
 #include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "render_context.h"
+#include "virglrenderer.h"
 
 /* On macOS, fork() without exec() inherits stale XPC connections
  * (Mach port based), breaking Metal shader compilation in worker
@@ -490,6 +492,18 @@ render_worker_spawn(const struct render_context_args *ctx_args)
    if (posix_spawnattr_init(&attr) != 0)
       return -1;
    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+
+   /* Neptune's host stack (D3DMetal) is x86_64-only, so a neptune worker must
+    * run the x86_64 slice of the server binary -- under Rosetta on Apple
+    * silicon -- while other backends take the native slice.  Requesting a
+    * slice only matters for a universal binary; CPU_TYPE_ANY last lets a thin
+    * build fall back to normal grading instead of failing with EBADARCH. */
+   if (ctx_args->init_flags & VIRGL_RENDERER_NEPTUNE) {
+      cpu_type_t cpu_pref[] = { CPU_TYPE_X86_64, CPU_TYPE_ANY };
+      cpu_subtype_t cpu_subpref[] = { CPU_SUBTYPE_ANY, CPU_SUBTYPE_ANY };
+      size_t ocount = 0;
+      posix_spawnattr_setarchpref_np(&attr, 2, cpu_pref, cpu_subpref, &ocount);
+   }
 
    posix_spawn_file_actions_t file_actions;
    if (posix_spawn_file_actions_init(&file_actions) != 0) {

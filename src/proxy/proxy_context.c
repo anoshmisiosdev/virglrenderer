@@ -713,8 +713,11 @@ proxy_context_create(uint32_t ctx_id,
    struct proxy_client *client = proxy_renderer.client;
    struct proxy_context *ctx;
 
+   const uint32_t capset_id = ctx_flags & VIRGL_RENDERER_CONTEXT_FLAG_CAPSET_ID_MASK;
+
    int ctx_fd;
-   if (!proxy_client_create_context(client, ctx_id, debug_len, debug_name, &ctx_fd)) {
+   if (!proxy_client_create_context(client, ctx_id, capset_id, debug_len, debug_name,
+                                    &ctx_fd)) {
       proxy_log("failed to create a context");
       return NULL;
    }

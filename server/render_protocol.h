@@ -77,6 +77,10 @@ struct render_client_op_reset_request {
 struct render_client_op_create_context_request {
    struct render_client_op_header header;
    uint32_t ctx_id;
+   /* the context's capset, so the server can pick the worker's backend (and,
+    * where a backend is confined to one architecture, the worker's slice of a
+    * universal binary) before the worker is spawned */
+   uint32_t capset_id;
    char ctx_name[32];
 };
 

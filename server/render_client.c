@@ -11,6 +11,7 @@
 #include "render_server.h"
 #include "render_worker.h"
 #include "virglrenderer.h"
+#include "virtgpu_drm.h"
 
 #ifdef ENABLE_VENUS
 #include "vkr_library.h"
@@ -82,9 +83,26 @@ init_context_args(struct render_context_args *ctx_args,
                   const struct render_client_op_create_context_request *req,
                   int ctx_fd)
 {
+   /* A worker services a single context, so it only needs that context's
+    * backend.  Scoping the flags keeps a worker from bringing up a backend it
+    * will never use -- e.g. an x86_64 neptune worker must not also initialize
+    * venus, which render_state_init treats as fatal if it fails. */
+   const uint32_t backends = VIRGL_RENDERER_VENUS | VIRGL_RENDERER_NEPTUNE;
+   uint32_t worker_flags = init_flags;
+   switch (req->capset_id) {
+   case VIRTGPU_DRM_CAPSET_VENUS:
+      worker_flags = (init_flags & ~backends) | VIRGL_RENDERER_VENUS;
+      break;
+   case VIRTGPU_DRM_CAPSET_NEPTUNE:
+      worker_flags = (init_flags & ~backends) | VIRGL_RENDERER_NEPTUNE;
+      break;
+   default:
+      break;
+   }
+
    *ctx_args = (struct render_context_args){
       .valid = true,
-      .init_flags = init_flags,
+      .init_flags = worker_flags,
       .ctx_id = req->ctx_id,
       .ctx_fd = ctx_fd,
    };
