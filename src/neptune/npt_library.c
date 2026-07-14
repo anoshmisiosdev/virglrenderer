@@ -137,6 +137,32 @@ npt_library_init(struct npt_d3d_library *lib)
       const char *p = getenv("NPT_D3D12_LIBRARY_PATH");
       npt_log("loaded D3D12 library: %s", p ? p : NPT_D3D12_LIBRARY_DEFAULT);
    }
+
+#ifdef __APPLE__
+   /* The macOS backend is Apple's D3DMetal, whose DXBC->AIR/DXIL shader
+    * converter has several defects the guest driver (Triton) patches around.
+    * Advertise exactly those patches -- each a specific ISGN/OSGN edit -- so
+    * the guest applies them only against this backend; a correct backend would
+    * leave these clear. */
+   if (lib->d3d11_module)
+      lib->workaround_flags =
+         NPT_WA_WIDEN_SCALAR_VS_INPUT_MASK |
+         NPT_WA_TYPE_VS_INPUT_FROM_VERTEX_FORMAT |
+         NPT_WA_LINEARIZE_NOPERSPECTIVE_PS_INPUT |
+         NPT_WA_SYNTHESIZE_IO_SIGNATURE_FROM_SHDR;
+#endif
+
+   /* Debug/test override: NPT_WA_FLAGS forces the workaround-flags set (hex or
+    * decimal), e.g. NPT_WA_FLAGS=0 disables every host workaround so the raw
+    * backend behavior (and the gates) can be exercised. */
+   {
+      const char *ov = getenv("NPT_WA_FLAGS");
+      if (ov) {
+         lib->workaround_flags = (uint32_t)strtoul(ov, NULL, 0);
+         npt_log("NPT_WA_FLAGS override -> workaround_flags=0x%08x",
+                 lib->workaround_flags);
+      }
+   }
 #else
    npt_log("D3D library loading: dlopen not available");
 #endif

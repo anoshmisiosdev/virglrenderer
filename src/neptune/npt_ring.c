@@ -17,6 +17,7 @@
 
 #include "npt_context.h"
 #include "npt_cs.h"
+#include "npt_library.h"   /* struct npt_d3d_library (workaround_flags) */
 #include "npt_profile.h"
 #include "npt_dispatch.h"
 #include "neptune-protocol/npt_protocol_host_dispatch.h"
@@ -576,6 +577,24 @@ npt_ring_create_from_cmd(struct npt_context *ctx,
    if (!npt_ring_validate_layout(&layout)) {
       npt_log("create_ring: invalid ring layout");
       return false;
+   }
+
+   /* Report the host backend's workaround flags into the guest-visible ring
+    * blob; the guest reads this word once at init and gates host-backend-
+    * specific shader/cap patches on it. Bounds-checked (4 bytes, 4-aligned,
+    * within the resource); the guest picks an offset it keeps disjoint from the
+    * ring regions it owns. NPT_WA_FLAGS_PRESENT marks the word as written. */
+   if (cmd->workaround_offset) {
+      if ((cmd->workaround_offset & 3u) ||
+          (size_t)cmd->workaround_offset + sizeof(uint32_t) > res->size) {
+         npt_log("create_ring: bad workaround_offset %u", cmd->workaround_offset);
+         return false;
+      }
+      struct npt_d3d_library *lib = npt_renderer_get_library();
+      uint32_t flags = (lib ? lib->workaround_flags : 0u) | NPT_WA_FLAGS_PRESENT;
+      atomic_store_explicit(
+         (_Atomic uint32_t *)((uint8_t *)res->u.data + cmd->workaround_offset),
+         flags, memory_order_release);
    }
 
    struct npt_ring *ring = npt_ring_create(&layout, ctx, cmd->idle_timeout);
