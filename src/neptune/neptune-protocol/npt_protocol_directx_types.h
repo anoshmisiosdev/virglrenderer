@@ -12,12 +12,6 @@
 #  if defined(_WIN32)
 #    define NPT_STDMETHODCALLTYPE __stdcall
 #  elif defined(__APPLE__) && defined(__x86_64__)
-/* The macOS host library is Apple's D3DMetal (via d3dmetal-native),
- * built to be called from Wine PE code: every COM method and D3D entry
- * point uses the Microsoft x64 calling convention, not SysV.  Aggregate-
- * returning D3D12 methods are already emitted with an explicit return
- * pointer parameter in this protocol, matching D3DMetal's
- * WIDL_EXPLICIT_AGGREGATE_RETURNS ABI. */
 #    define NPT_STDMETHODCALLTYPE __attribute__((ms_abi))
 #  else
 #    define NPT_STDMETHODCALLTYPE

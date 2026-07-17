@@ -523,7 +523,7 @@ npt_decode_IDXGIAdapter3_RegisterHardwareContentProtectionTeardownStatusEvent_ar
 static inline void
 npt_replace_IDXGIAdapter3_RegisterHardwareContentProtectionTeardownStatusEvent_args_handle(struct npt_dispatch_context *ctx, struct npt_command_IDXGIAdapter3_RegisterHardwareContentProtectionTeardownStatusEvent *args)
 {
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void
@@ -894,7 +894,7 @@ npt_decode_IDXGIAdapter3_RegisterVideoMemoryBudgetChangeNotificationEvent_args_t
 static inline void
 npt_replace_IDXGIAdapter3_RegisterVideoMemoryBudgetChangeNotificationEvent_args_handle(struct npt_dispatch_context *ctx, struct npt_command_IDXGIAdapter3_RegisterVideoMemoryBudgetChangeNotificationEvent *args)
 {
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void

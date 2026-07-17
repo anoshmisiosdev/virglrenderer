@@ -7074,7 +7074,7 @@ npt_decode_ID3D11Device4_RegisterDeviceRemovedEvent_args_temp(struct npt_cs_deco
 static inline void
 npt_replace_ID3D11Device4_RegisterDeviceRemovedEvent_args_handle(struct npt_dispatch_context *ctx, struct npt_command_ID3D11Device4_RegisterDeviceRemovedEvent *args)
 {
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void

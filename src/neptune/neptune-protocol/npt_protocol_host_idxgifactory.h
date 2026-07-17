@@ -1314,7 +1314,7 @@ npt_decode_IDXGIFactory2_RegisterStereoStatusEvent_args_temp(struct npt_cs_decod
 static inline void
 npt_replace_IDXGIFactory2_RegisterStereoStatusEvent_args_handle(struct npt_dispatch_context *ctx, struct npt_command_IDXGIFactory2_RegisterStereoStatusEvent *args)
 {
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void
@@ -1598,7 +1598,7 @@ npt_decode_IDXGIFactory2_RegisterOcclusionStatusEvent_args_temp(struct npt_cs_de
 static inline void
 npt_replace_IDXGIFactory2_RegisterOcclusionStatusEvent_args_handle(struct npt_dispatch_context *ctx, struct npt_command_IDXGIFactory2_RegisterOcclusionStatusEvent *args)
 {
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void
@@ -2443,7 +2443,7 @@ npt_decode_IDXGIFactory7_RegisterAdaptersChangedEvent_args_temp(struct npt_cs_de
 static inline void
 npt_replace_IDXGIFactory7_RegisterAdaptersChangedEvent_args_handle(struct npt_dispatch_context *ctx, struct npt_command_IDXGIFactory7_RegisterAdaptersChangedEvent *args)
 {
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void
