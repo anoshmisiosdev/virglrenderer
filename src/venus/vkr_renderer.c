@@ -82,6 +82,12 @@ vkr_renderer_init(uint32_t flags, const struct vkr_renderer_callbacks *cbs)
 void
 vkr_renderer_fini(void)
 {
+   /* A Neptune-only worker never calls vkr_renderer_init, so the list
+    * head is still zeroed here and walking it would fault the worker
+    * during teardown, stranding un-acked guest ops. */
+   if (!vkr_state.contexts.next)
+      return;
+
    list_for_each_entry_safe (struct vkr_context, ctx, &vkr_state.contexts, head)
       vkr_context_destroy(ctx);
 
