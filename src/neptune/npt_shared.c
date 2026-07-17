@@ -6,7 +6,7 @@
  * See npt_shared.h for the model.  The COM flow (GetSharedHandle /
  * OpenSharedResource) is platform-neutral; only the descriptor behind
  * the HANDLE differs: dxvk's DxvkSharedTextureDescriptor (dmabuf) on
- * Linux, d3dmetal-native's dmn_shared_texture_handle (shm fd) on macOS.
+ * Linux, the darwin backend's shared-texture descriptor (shm fd) on macOS.
  */
 
 #include "npt_shared.h"
@@ -15,9 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifdef __APPLE__
-#include <d3dmetal_native.h>
-#else
+#ifndef __APPLE__
 #include <dxvk_shared_resource.h>
 #endif
 
@@ -31,6 +29,27 @@
 
 /* D3D11_BIND_SHADER_RESOURCE (d3d11.h); consumers sample the texture. */
 #define NPT_D3D11_BIND_SHADER_RESOURCE 0x8u
+
+#ifdef __APPLE__
+/* The POD both darwin backends hand through GetSharedHandle /
+ * OpenSharedResource, defined here so the renderer neither links nor
+ * includes a backend header.  d3dmetal's dmn_shared_texture_handle and
+ * dxmt's dxmt_shared_texture_handle share this exact ABI: same 'DMTX'
+ * magic, version, and field layout. */
+#define NPT_DARWIN_SHARED_TEXTURE_MAGIC   0x58544D44u /* 'DMTX' */
+#define NPT_DARWIN_SHARED_HANDLE_VERSION  1u
+struct npt_darwin_shared_texture {
+   uint32_t magic;
+   uint32_t version;
+   int32_t  fd;            /* process-local; sent via SCM_RIGHTS, then patched */
+   uint32_t width, height;
+   uint32_t dxgi_format;
+   uint32_t mip_levels, array_size, sample_count;
+   uint32_t bind_flags, misc_flags, cpu_access;
+   uint64_t stride;        /* bytesPerRow */
+   uint64_t size;          /* logical stride*height */
+};
+#endif
 
 /* OPEN_RES arrives on the consumer's ring thread; the resource fd
  * arrives on the dispatch thread via the proxy's attach-forwarding
@@ -85,10 +104,10 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
    memset(&info, 0, sizeof(info));
 
 #ifdef __APPLE__
-   const dmn_shared_texture_handle *desc =
-      (const dmn_shared_texture_handle *)(uintptr_t)handle;
-   if (desc->magic != DMN_SHARED_TEXTURE_MAGIC ||
-       desc->version != DMN_SHARED_HANDLE_VERSION || desc->fd < 0) {
+   const struct npt_darwin_shared_texture *desc =
+      (const struct npt_darwin_shared_texture *)(uintptr_t)handle;
+   if (desc->magic != NPT_DARWIN_SHARED_TEXTURE_MAGIC ||
+       desc->version != NPT_DARWIN_SHARED_HANDLE_VERSION || desc->fd < 0) {
       npt_log("shared: export: blob_id %" PRIu64 " bad descriptor", blob_id);
       return NPT_E_FAIL;
    }
@@ -98,8 +117,8 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
               "SHADER_RESOURCE bind (0x%x); consumers cannot sample it",
               blob_id, desc->bind_flags);
 
-   /* d3dmetal-native shared textures are always one linear plane of
-    * shared memory; modifier/texture_layout have no meaning here. */
+   /* Backend shared textures are always one linear plane of shared
+    * memory; modifier/texture_layout have no meaning here. */
    info.allocation_size = desc->size;
    info.plane_count = 1;
    info.planes[0].offset = 0;
@@ -215,10 +234,10 @@ npt_shared_open_res(struct npt_context *ctx, uint64_t device_id,
 
    /* Rebuild the exporter's descriptor around our own fd reference. */
 #ifdef __APPLE__
-   dmn_shared_texture_handle desc;
+   struct npt_darwin_shared_texture desc;
    memset(&desc, 0, sizeof(desc));
-   desc.magic = DMN_SHARED_TEXTURE_MAGIC;
-   desc.version = DMN_SHARED_HANDLE_VERSION;
+   desc.magic = NPT_DARWIN_SHARED_TEXTURE_MAGIC;
+   desc.version = NPT_DARWIN_SHARED_HANDLE_VERSION;
    desc.width = cmd->width;
    desc.height = cmd->height;
    desc.dxgi_format = cmd->format;
@@ -229,7 +248,7 @@ npt_shared_open_res(struct npt_context *ctx, uint64_t device_id,
    desc.misc_flags = cmd->misc_flags;
    desc.cpu_access = cmd->cpu_access_flags;
    /* One linear plane of shared memory; usage/layout/modifier from the
-    * wire have no d3dmetal-native equivalent. */
+    * wire have no darwin-backend equivalent. */
    desc.stride = cmd->export_info.planes[0].pitch;
    desc.size = cmd->export_info.allocation_size;
 #else

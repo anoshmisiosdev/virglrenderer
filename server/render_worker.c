@@ -493,13 +493,20 @@ render_worker_spawn(const struct render_context_args *ctx_args)
       return -1;
    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
 
-   /* Neptune's host stack (D3DMetal) is x86_64-only, so a neptune worker must
-    * run the x86_64 slice of the server binary -- under Rosetta on Apple
-    * silicon -- while other backends take the native slice.  Requesting a
-    * slice only matters for a universal binary; CPU_TYPE_ANY last lets a thin
-    * build fall back to normal grading instead of failing with EBADARCH. */
+   /* The universal server binary carries one neptune D3D backend per slice:
+    * x86_64 = d3dmetal-native (Apple D3DMetal is x86_64-only, runs under
+    * Rosetta), arm64 = dxmt-native (native).  NPT_BACKEND selects the slice
+    * for neptune workers; unset or "d3dmetal" keeps the historical x86_64
+    * behavior.  Requesting a slice only matters for a universal binary;
+    * CPU_TYPE_ANY last lets a thin build fall back to normal grading
+    * instead of failing with EBADARCH. */
    if (ctx_args->init_flags & VIRGL_RENDERER_NEPTUNE) {
-      cpu_type_t cpu_pref[] = { CPU_TYPE_X86_64, CPU_TYPE_ANY };
+      const char *backend = getenv("NPT_BACKEND");
+      const bool use_dxmt = backend && !strcmp(backend, "dxmt");
+      if (backend && *backend && !use_dxmt && strcmp(backend, "d3dmetal"))
+         render_log("unknown NPT_BACKEND '%s', using d3dmetal", backend);
+      cpu_type_t cpu_pref[] = { use_dxmt ? CPU_TYPE_ARM64 : CPU_TYPE_X86_64,
+                                CPU_TYPE_ANY };
       cpu_subtype_t cpu_subpref[] = { CPU_SUBTYPE_ANY, CPU_SUBTYPE_ANY };
       size_t ocount = 0;
       posix_spawnattr_setarchpref_np(&attr, 2, cpu_pref, cpu_subpref, &ocount);

@@ -419,23 +419,12 @@ if with_neptune_backend
    conf_data.set('ENABLE_NEPTUNE_BACKEND', 1)
 endif
 
-# d3dmetal-native hosts Apple's D3DMetal.framework on darwin neptune
-# builds: it exports the D3D11/DXGI/D3D12 entry points the renderer
-# dlopens, plus the dmn_* embedder API (events, shared-resource
-# descriptors) the neptune glue links against.  D3DMetal ships
-# x86_64-only, so any build that compiles the backend must be x86_64.
-# A client-mode build links no backend, so it is exempt and may be
-# built natively (arm64).
-if with_neptune_backend and with_host_darwin
-   if host_machine.cpu_family() != 'x86_64'
-      error('neptune on darwin requires an x86_64 build: ' +
-            'D3DMetal.framework (hosted by d3dmetal-native) is x86_64-only. ' +
-            'Use -Dneptune-mode=client for a native proxy-only library.')
-   endif
-   d3dmetal_native_dep = dependency('d3dmetal-native')
-   d3dmetal_native_libdir = d3dmetal_native_dep.get_variable(
-      pkgconfig : 'libdir', default_value : '')
-endif
+# The darwin neptune backend is dlopened, not linked: the render worker
+# runs the x86_64 slice (libd3dmetal-native, Apple D3DMetal under Rosetta)
+# or the arm64 slice (libdxmt-native, native D3D11-on-Metal) per NPT_BACKEND
+# (render_worker.c archpref), and npt_library.c dlopens the umbrella and
+# dlsyms both the D3D entry points and the dmn_*/dxmt_* embedder event API.
+# So there is no backend build dependency and no per-backend build flag.
 
 if with_render_server
    if host_machine.system() in ['freebsd', 'openbsd']

@@ -28,6 +28,15 @@
 #define NPT_WA_TYPE_VS_INPUT_FROM_VERTEX_FORMAT  (1u << 1)  /* VS ISGN comp type from bound format */
 #define NPT_WA_LINEARIZE_NOPERSPECTIVE_PS_INPUT  (1u << 2)  /* dcl_input_ps noperspective -> linear */
 #define NPT_WA_SYNTHESIZE_IO_SIGNATURE_FROM_SHDR (1u << 3)  /* empty GS ISGN/OSGN from SHDR DCLs */
+
+/* Which darwin backend the loaded umbrella turned out to be, detected in
+ * npt_library_init from the embedder event-API symbol prefix. */
+enum npt_backend_kind {
+   NPT_BACKEND_UNKNOWN = 0,
+   NPT_BACKEND_D3DMETAL,   /* Apple D3DMetal via d3dmetal-native (dmn_*) */
+   NPT_BACKEND_DXMT,       /* DXMT native D3D11-on-Metal (dxmt_*) */
+};
+
 struct npt_d3d_library {
    void *d3d11_module;
    void *dxgi_module;
@@ -39,6 +48,15 @@ struct npt_d3d_library {
    PFN_CreateDXGIFactory1 pfn_CreateDXGIFactory1;
 
    PFN_D3D12CreateDevice pfn_D3D12CreateDevice;
+
+   /* Darwin embedder event API, dlsym'd from the backend umbrella
+    * (d3dmetal exports dmn_event_*, dxmt exports dxmt_event_*).  NULL off
+    * darwin or when the backend did not load; npt_event.c signals through
+    * these. */
+   void *(*pfn_event_create)(int manual_reset, int initial_state);
+   void  (*pfn_event_close)(void *handle);
+   int   (*pfn_event_dup_fd)(void *handle);
+   enum npt_backend_kind backend;
 
    /* NPT_WA_* bits describing the workarounds the loaded backend needs, set in
     * npt_library_init. Reported to the guest per-context (via the ring blob) so
