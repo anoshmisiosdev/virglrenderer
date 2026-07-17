@@ -5,6 +5,8 @@
 
 #include "npt_event.h"
 #include "npt_context.h"
+#include "npt_library.h"
+#include "npt_renderer.h"
 
 #include "util/hash_table.h"
 #include "util/list.h"
@@ -16,9 +18,6 @@
 #if defined(__linux__)
 #include <sys/eventfd.h>
 #endif
-#if defined(__APPLE__)
-#include <d3dmetal_native.h>
-#endif
 
 static int
 event_fd_create(struct npt_event_fd *out)
@@ -27,9 +26,14 @@ event_fd_create(struct npt_event_fd *out)
    out->fd = eventfd(0, EFD_CLOEXEC);
    return out->fd < 0 ? -1 : 0;
 #elif defined(__APPLE__)
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   if (!lib || !lib->pfn_event_create) {
+      npt_log("event: backend event API unavailable");
+      return -1;
+   }
    /* Manual-reset matches Win32's default for guest-created HANDLEs
     * (we don't auto-clear on read). */
-   out->handle = dmn_event_create(/*manual_reset=*/1, /*initial_state=*/0);
+   out->handle = lib->pfn_event_create(/*manual_reset=*/1, /*initial_state=*/0);
    return out->handle ? 0 : -1;
 #else
    /* Prefer pipe2(O_CLOEXEC) where available (Linux, FreeBSD) to
@@ -69,7 +73,9 @@ event_fd_destroy(struct npt_event_fd *fd)
    }
 #elif defined(__APPLE__)
    if (fd->handle) {
-      dmn_event_close(fd->handle);
+      struct npt_d3d_library *lib = npt_renderer_get_library();
+      if (lib && lib->pfn_event_close)
+         lib->pfn_event_close(fd->handle);
       fd->handle = NULL;
    }
 #else
@@ -106,7 +112,9 @@ event_fd_dup_wait_fd(const struct npt_event_fd *fd)
 #if defined(__linux__)
    return dup(fd->fd);
 #elif defined(__APPLE__)
-   return dmn_event_dup_fd(fd->handle);
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   return (lib && lib->pfn_event_dup_fd) ? lib->pfn_event_dup_fd(fd->handle)
+                                         : -1;
 #else
    return dup(fd->read_fd);
 #endif

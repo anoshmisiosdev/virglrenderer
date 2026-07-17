@@ -11,13 +11,21 @@
 #ifdef HAVE_DLFCN_H
 #include <dlfcn.h>
 #endif
+#include <stdio.h>
 
 /* Defaults; override via NPT_*_LIBRARY_PATH env vars.
  *
- * On darwin all three host entry points live in libd3dmetal-native,
- * which the renderer already links for the dmn_* glue, so dlopen
- * resolves to the loaded image and the three slots alias one another. */
-#ifdef __APPLE__
+ * On darwin the D3D entry points and the embedder event API both live in
+ * one backend umbrella, dlopened (never linked) and dlsym'd at runtime:
+ * libd3dmetal-native (Apple D3DMetal, x86_64/Rosetta) on the x86_64 slice,
+ * libdxmt-native (native D3D11-on-Metal) on the arm64 slice.  All three
+ * D3D slots resolve to that one image.  DXMT has no D3D12 entry point; that
+ * slot's dlsym fails and the D3D12 overrides degrade to E_FAIL by design. */
+#if defined(__APPLE__) && defined(__aarch64__)
+#define NPT_D3D11_LIBRARY_DEFAULT "libdxmt-native.dylib"
+#define NPT_DXGI_LIBRARY_DEFAULT  "libdxmt-native.dylib"
+#define NPT_D3D12_LIBRARY_DEFAULT "libdxmt-native.dylib"
+#elif defined(__APPLE__)
 #define NPT_D3D11_LIBRARY_DEFAULT "libd3dmetal-native.dylib"
 #define NPT_DXGI_LIBRARY_DEFAULT  "libd3dmetal-native.dylib"
 #define NPT_D3D12_LIBRARY_DEFAULT "libd3dmetal-native.dylib"
@@ -61,6 +69,58 @@ npt_library_sym(void *handle, const char *name)
    }
    return sym;
 }
+
+#ifdef __APPLE__
+/* Bind the backend's embedder event API from the loaded umbrella.
+ * d3dmetal exports dmn_event_*, dxmt exports dxmt_event_*; probe create()
+ * for each prefix to identify the backend, then bind the trio npt_event.c
+ * uses.  Also records lib->backend for the workaround-flags gate below. */
+static void
+npt_library_load_event_api(struct npt_d3d_library *lib)
+{
+   void *mod = lib->d3d11_module ? lib->d3d11_module
+             : lib->dxgi_module  ? lib->dxgi_module
+             :                     lib->d3d12_module;
+   if (!mod)
+      return;
+
+   static const struct {
+      const char *prefix;
+      enum npt_backend_kind kind;
+   } candidates[] = {
+      { "dmn_",  NPT_BACKEND_D3DMETAL },
+      { "dxmt_", NPT_BACKEND_DXMT },
+   };
+
+   for (size_t i = 0; i < ARRAY_SIZE(candidates); i++) {
+      char name[32];
+      snprintf(name, sizeof(name), "%sevent_create", candidates[i].prefix);
+      dlerror();
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+      void *create = dlsym(mod, name);
+#pragma GCC diagnostic pop
+      if (!create)
+         continue;
+
+      lib->backend = candidates[i].kind;
+      lib->pfn_event_create =
+         ((union { void *p; void *(*f)(int, int); }){ .p = create }).f;
+
+      snprintf(name, sizeof(name), "%sevent_close", candidates[i].prefix);
+      lib->pfn_event_close =
+         ((union { void *p; void (*f)(void *); }){
+            .p = npt_library_sym(mod, name) }).f;
+
+      snprintf(name, sizeof(name), "%sevent_dup_fd", candidates[i].prefix);
+      lib->pfn_event_dup_fd =
+         ((union { void *p; int (*f)(void *); }){
+            .p = npt_library_sym(mod, name) }).f;
+      return;
+   }
+   npt_log("backend event API (dmn_/dxmt_event_*) not found");
+}
+#endif /* __APPLE__ */
 
 #endif /* HAVE_DLFCN_H */
 
@@ -139,12 +199,13 @@ npt_library_init(struct npt_d3d_library *lib)
    }
 
 #ifdef __APPLE__
-   /* The macOS backend is Apple's D3DMetal, whose DXBC->AIR/DXIL shader
-    * converter has several defects the guest driver (Triton) patches around.
-    * Advertise exactly those patches -- each a specific ISGN/OSGN edit -- so
-    * the guest applies them only against this backend; a correct backend would
-    * leave these clear. */
-   if (lib->d3d11_module)
+   npt_library_load_event_api(lib);
+
+   /* D3DMetal's DXBC->AIR/DXIL shader converter has several defects the guest
+    * driver (Triton) patches around. Advertise exactly those patches -- each a
+    * specific ISGN/OSGN edit -- so the guest applies them only against
+    * D3DMetal; DXMT reports none. */
+   if (lib->backend == NPT_BACKEND_D3DMETAL && lib->d3d11_module)
       lib->workaround_flags =
          NPT_WA_WIDEN_SCALAR_VS_INPUT_MASK |
          NPT_WA_TYPE_VS_INPUT_FROM_VERTEX_FORMAT |

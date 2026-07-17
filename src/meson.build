@@ -257,12 +257,9 @@ endif
 
 if with_neptune_backend
    virgl_sources += neptune_sources
-   if with_host_darwin
-      # macOS shares textures through d3dmetal-native's shared-resource
-      # descriptors (the dxvk contract is Linux-only) and links it as a
-      # real dependency for the dmn_* embedder API.
-      virgl_depends += [d3dmetal_native_dep]
-   else
+   # macOS needs no backend dep: it dlopens the backend umbrella and
+   # defines the shared-texture descriptor locally (npt_shared.c).
+   if not with_host_darwin
       # Headers only -- Neptune dlopens the d3d11/dxgi libraries at runtime,
       # so the renderer must not gain a NEEDED entry on libdxvk_*.
       dxvk_dep = dependency('dxvk-dxgi').partial_dependency(

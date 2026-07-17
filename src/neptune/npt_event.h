@@ -15,10 +15,10 @@
 
 struct npt_context;
 
-/* Linux uses eventfd (one fd); darwin uses a d3dmetal-native event
- * handle (the HANDLE the host library's SetEvent acts on, with
- * dmn_event_dup_fd() providing the pollable side); other POSIX uses
- * pipe2 (host writes the signal end, we poll the read end). */
+/* Linux uses eventfd (one fd); darwin uses a backend event handle (the
+ * HANDLE the host library's SetEvent acts on, with the backend's
+ * event_dup_fd providing the pollable side); other POSIX uses pipe2
+ * (host writes the signal end, we poll the read end). */
 struct npt_event_fd {
 #if defined(__linux__)
    int fd;
