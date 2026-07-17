@@ -389,10 +389,9 @@ npt_cs_handle_register_guest_id(struct npt_dispatch_context *ctx,
                                 void *obj,
                                 npt_object_type type);
 
-/* Win32 handles are opaque on the wire: identity pass-through for most
- * (HWND, shared-resource HANDLEs), with `_replace` substituting a
- * local proxy for event HANDLEs.  Identity preserves the KMT-vs-NT
- * high-bit dispatch host D3D libraries use to route OpenSharedResource. */
+/* Win32 handles are opaque on the wire: identity pass-through.  Identity
+ * preserves the KMT-vs-NT high-bit dispatch host D3D libraries use to
+ * route OpenSharedResource. */
 static inline npt_object_id
 npt_win32_handle_get_id(const void *handle)
 {
@@ -405,23 +404,30 @@ npt_win32_handle_from_id(npt_object_id id)
    return (void *)(uintptr_t)id;
 }
 
-/* Returns the host-side eventfd (cast to void *) when the token has a
- * registered proxy, else NULL. */
-void *npt_event_replace_by_token(struct npt_dispatch_context *dispatch,
-                                  npt_object_id id);
-
+/* Non-event Win32 HANDLEs (HWND, shared-resource HANDLEs) round-trip
+ * unchanged. */
 static inline void *
 npt_win32_handle_replace(struct npt_dispatch_context *ctx,
                          npt_object_id id)
 {
-   if (!id)
-      return NULL;
-   /* Event HANDLEs route through the eventfd proxy registered by
-    * REGISTER_EVENT / ARM_EVENT_FENCE; everything else is identity. */
-   void *proxy = npt_event_replace_by_token(ctx, id);
-   if (proxy)
-      return proxy;
+   (void)ctx;
    return (void *)(uintptr_t)id;
+}
+
+/* Host-side event proxy for a guest event token, registered by
+ * REGISTER_EVENT / ARM_EVENT_FENCE, or NULL when the token has none. */
+void *npt_event_replace_by_token(struct npt_dispatch_context *dispatch,
+                                  npt_object_id id);
+
+/* Event HANDLEs resolve to their host proxy.  An unregistered token maps
+ * to NULL rather than the identity fallback, so a guest that skipped
+ * REGISTER_EVENT cannot hand a raw token to a backend that dereferences
+ * the handle. */
+static inline void *
+npt_event_handle_replace(struct npt_dispatch_context *ctx,
+                         npt_object_id id)
+{
+   return npt_event_replace_by_token(ctx, id);
 }
 
 #endif /* NPT_CS_H */

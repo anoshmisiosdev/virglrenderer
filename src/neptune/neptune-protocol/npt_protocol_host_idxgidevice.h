@@ -988,7 +988,7 @@ npt_decode_IDXGIDevice2_EnqueueSetEvent_args_temp(struct npt_cs_decoder *dec,
 static inline void
 npt_replace_IDXGIDevice2_EnqueueSetEvent_args_handle(struct npt_dispatch_context *ctx, struct npt_command_IDXGIDevice2_EnqueueSetEvent *args)
 {
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void

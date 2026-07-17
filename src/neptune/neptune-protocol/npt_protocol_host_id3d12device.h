@@ -4409,7 +4409,7 @@ npt_replace_ID3D12Device1_SetEventOnMultipleFenceCompletion_args_handle(struct n
             args->ppFences[_i] = npt_cs_handle_lookup(ctx,
                 (npt_object_id)(uintptr_t)args->ppFences[_i], NPT_OBJECT_TYPE_ID3D12FENCE);
     }
-    args->hEvent = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEvent);
+    args->hEvent = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEvent);
 }
 
 static inline void
@@ -6785,7 +6785,7 @@ npt_decode_ID3D12Device6_SetBackgroundProcessingMode_args_temp(struct npt_cs_dec
 static inline void
 npt_replace_ID3D12Device6_SetBackgroundProcessingMode_args_handle(struct npt_dispatch_context *ctx, struct npt_command_ID3D12Device6_SetBackgroundProcessingMode *args)
 {
-    args->hEventToSignalUponCompletion = (HANDLE)(uintptr_t)npt_win32_handle_replace(ctx, (npt_object_id)args->hEventToSignalUponCompletion);
+    args->hEventToSignalUponCompletion = (HANDLE)(uintptr_t)npt_event_handle_replace(ctx, (npt_object_id)args->hEventToSignalUponCompletion);
 }
 
 static inline void
