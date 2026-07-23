@@ -292,6 +292,14 @@ npt_ring_submit_cmd(struct npt_ring *ring,
       npt_ring_store_head(ring, cur_ring_head);
 
       npt_context_on_ring_seqno_update(ring->context, ring->id, cur_ring_head);
+
+      /* A sustained batch keeps the ring busy for seconds at a time, so
+       * publishing feedback only once the ring drains would freeze the
+       * guest-visible fence values and stall every guest wait keyed on them.
+       * This runs on the dispatch thread, keeping the host D3D11 context
+       * single-threaded; the poll rate-limits itself and early-outs when
+       * nothing is pending. */
+      npt_feedback_poll(ring->context);
    }
 
    npt_cs_decoder_reset(dec);
