@@ -8,10 +8,27 @@
 #include "vkr_image_gen.h"
 #include "vkr_physical_device.h"
 
+/* See vkr_buffer_fix_create_info. */
+static void
+vkr_image_fix_create_info(struct vkr_device *dev, VkImageCreateInfo *pCreateInfo)
+{
+   if (!dev->physical_device->is_dma_buf_emulated)
+      return;
+
+   VkExternalMemoryImageCreateInfo *ext_create_info =
+      vkr_find_struct(pCreateInfo, VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO);
+   if (ext_create_info)
+      ext_create_info->handleTypes &= ~VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+}
+
 static void
 vkr_dispatch_vkCreateImage(struct vn_dispatch_context *dispatch,
                            struct vn_command_vkCreateImage *args)
 {
+   struct vkr_device *dev = vkr_device_from_handle(args->device);
+
+   vkr_image_fix_create_info(dev, (VkImageCreateInfo *)args->pCreateInfo);
+
    /* XXX If VkExternalMemoryImageCreateInfo is chained by the app, all is
     * good.  If it is not chained, we might still bind an external memory to
     * the image, because vkr_dispatch_vkAllocateMemory makes any HOST_VISIBLE
@@ -150,6 +167,8 @@ vkr_dispatch_vkGetDeviceImageSubresourceLayout(
    struct vkr_device *dev = vkr_device_from_handle(args->device);
    struct vn_device_proc_table *vk = &dev->proc_table;
 
+   vkr_image_fix_create_info(dev, (VkImageCreateInfo *)args->pInfo->pCreateInfo);
+
    vn_replace_vkGetDeviceImageSubresourceLayout_args_handle(args);
    vk->GetDeviceImageSubresourceLayout(args->device, args->pInfo, args->pLayout);
 }
@@ -219,6 +238,8 @@ vkr_dispatch_vkGetDeviceImageMemoryRequirements(
    struct vkr_device *dev = vkr_device_from_handle(args->device);
    struct vn_device_proc_table *vk = &dev->proc_table;
 
+   vkr_image_fix_create_info(dev, (VkImageCreateInfo *)args->pInfo->pCreateInfo);
+
    vn_replace_vkGetDeviceImageMemoryRequirements_args_handle(args);
    vk->GetDeviceImageMemoryRequirements(args->device, args->pInfo,
                                         args->pMemoryRequirements);
@@ -231,6 +252,8 @@ vkr_dispatch_vkGetDeviceImageSparseMemoryRequirements(
 {
    struct vkr_device *dev = vkr_device_from_handle(args->device);
    struct vn_device_proc_table *vk = &dev->proc_table;
+
+   vkr_image_fix_create_info(dev, (VkImageCreateInfo *)args->pInfo->pCreateInfo);
 
    vn_replace_vkGetDeviceImageSparseMemoryRequirements_args_handle(args);
    vk->GetDeviceImageSparseMemoryRequirements(args->device, args->pInfo,

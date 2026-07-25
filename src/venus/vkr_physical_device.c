@@ -297,6 +297,26 @@ vkr_physical_device_init_extensions(struct vkr_physical_device *physical_dev)
       }
    }
 
+   /* Advertise the extensions we emulate on top of a host that lacks them.
+    *
+    * On macOS the host has VK_EXT_external_memory_metal instead of dma_buf.
+    * Device memory is backed by POSIX shm wrapped in an MTLBuffer and is
+    * handed to the guest as an fd, so the guest driver can use it exactly as
+    * it would a dma_buf, but the host Vulkan implementation must never see a
+    * dma_buf handle type.
+    */
+   VkExtensionProperties prop;
+   uint32_t emulated_count = 0;
+   physical_dev->is_dma_buf_emulated =
+      !physical_dev->EXT_external_memory_dma_buf && physical_dev->EXT_external_memory_metal;
+   emulated_count += physical_dev->is_dma_buf_emulated;
+   exts = realloc(exts, sizeof(*exts) * (advertised_count + emulated_count));
+   if (physical_dev->is_dma_buf_emulated) {
+      strcpy(prop.extensionName, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME);
+      prop.specVersion = vkr_extension_get_spec_version(prop.extensionName);
+      exts[advertised_count++] = prop;
+   }
+
    if (physical_dev->KHR_external_fence_fd) {
       const VkPhysicalDeviceExternalFenceInfo fence_info = {
          .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_FENCE_INFO,
@@ -745,6 +765,19 @@ vkr_dispatch_vkGetPhysicalDeviceFormatProperties2(
                                           args->pFormatProperties);
 }
 
+/* Report a non-external host allocation to the guest as a dma_buf.  The fd the
+ * guest ends up with is a shm fd owned by virglrenderer rather than anything
+ * the host Vulkan implementation exported, so the capability is ours to state.
+ */
+static void
+vkr_emulate_dma_buf_memory_properties(VkExternalMemoryProperties *props)
+{
+   props->externalMemoryFeatures =
+      VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT | VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
+   props->exportFromImportedHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+   props->compatibleHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+}
+
 static void
 vkr_dispatch_vkGetPhysicalDeviceImageFormatProperties2(
    UNUSED struct vn_dispatch_context *dispatch,
@@ -754,9 +787,34 @@ vkr_dispatch_vkGetPhysicalDeviceImageFormatProperties2(
       vkr_physical_device_from_handle(args->physicalDevice);
    struct vn_physical_device_proc_table *vk = &physical_dev->proc_table;
 
+   /* The host knows nothing about dma_buf, and the memory it would be asked
+    * about is plain shm-backed memory with no Vulkan-level external handle.
+    * Ask about a non-external image and report the answer as dma_buf.
+    */
+   VkPhysicalDeviceExternalImageFormatInfo *ext_info = NULL;
+   if (physical_dev->is_dma_buf_emulated) {
+      ext_info = vkr_find_struct(args->pImageFormatInfo,
+                                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO);
+      if (ext_info &&
+          ext_info->handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT)
+         ext_info->handleType = 0;
+      else
+         ext_info = NULL;
+   }
+
    vn_replace_vkGetPhysicalDeviceImageFormatProperties2_args_handle(args);
    args->ret = vk->GetPhysicalDeviceImageFormatProperties2(
       args->physicalDevice, args->pImageFormatInfo, args->pImageFormatProperties);
+
+   if (ext_info) {
+      ext_info->handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+
+      VkExternalImageFormatProperties *img_props =
+         vkr_find_struct(args->pImageFormatProperties->pNext,
+                         VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES);
+      if (img_props && args->ret == VK_SUCCESS)
+         vkr_emulate_dma_buf_memory_properties(&img_props->externalMemoryProperties);
+   }
 }
 
 static void
@@ -782,9 +840,24 @@ vkr_dispatch_vkGetPhysicalDeviceExternalBufferProperties(
       vkr_physical_device_from_handle(args->physicalDevice);
    struct vn_physical_device_proc_table *vk = &physical_dev->proc_table;
 
+   /* See vkr_dispatch_vkGetPhysicalDeviceImageFormatProperties2. */
+   VkPhysicalDeviceExternalBufferInfo *info =
+      (VkPhysicalDeviceExternalBufferInfo *)args->pExternalBufferInfo;
+   const bool emulate =
+      physical_dev->is_dma_buf_emulated &&
+      info->handleType == VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+   if (emulate)
+      info->handleType = 0;
+
    vn_replace_vkGetPhysicalDeviceExternalBufferProperties_args_handle(args);
    vk->GetPhysicalDeviceExternalBufferProperties(
       args->physicalDevice, args->pExternalBufferInfo, args->pExternalBufferProperties);
+
+   if (emulate) {
+      info->handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+      vkr_emulate_dma_buf_memory_properties(
+         &args->pExternalBufferProperties->externalMemoryProperties);
+   }
 }
 
 static void

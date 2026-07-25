@@ -8,10 +8,30 @@
 #include "vkr_buffer_gen.h"
 #include "vkr_physical_device.h"
 
+/* When dma_buf is emulated the guest asks for external memory the host cannot
+ * name: the allocation is shm wrapped in an MTLBuffer and is imported, never
+ * exported.  Create the host buffer as non-external instead.
+ */
+static void
+vkr_buffer_fix_create_info(struct vkr_device *dev, VkBufferCreateInfo *pCreateInfo)
+{
+   if (!dev->physical_device->is_dma_buf_emulated)
+      return;
+
+   VkExternalMemoryBufferCreateInfo *ext_create_info =
+      vkr_find_struct(pCreateInfo, VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO);
+   if (ext_create_info)
+      ext_create_info->handleTypes &= ~VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+}
+
 static void
 vkr_dispatch_vkCreateBuffer(struct vn_dispatch_context *dispatch,
                             struct vn_command_vkCreateBuffer *args)
 {
+   struct vkr_device *dev = vkr_device_from_handle(args->device);
+
+   vkr_buffer_fix_create_info(dev, (VkBufferCreateInfo *)args->pCreateInfo);
+
    /* XXX If VkExternalMemoryBufferCreateInfo is chained by the app, all is
     * good.  If it is not chained, we might still bind an external memory to
     * the buffer, because vkr_dispatch_vkAllocateMemory makes any HOST_VISIBLE
@@ -138,6 +158,8 @@ vkr_dispatch_vkGetDeviceBufferMemoryRequirements(
 {
    struct vkr_device *dev = vkr_device_from_handle(args->device);
    struct vn_device_proc_table *vk = &dev->proc_table;
+
+   vkr_buffer_fix_create_info(dev, (VkBufferCreateInfo *)args->pInfo->pCreateInfo);
 
    vn_replace_vkGetDeviceBufferMemoryRequirements_args_handle(args);
    vk->GetDeviceBufferMemoryRequirements(args->device, args->pInfo,

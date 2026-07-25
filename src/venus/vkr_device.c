@@ -145,8 +145,19 @@ vkr_dispatch_vkCreateDevice(struct vn_dispatch_context *dispatch,
       }
 
       ext_count = 0;
-      for (uint32_t i = 0; i < args->pCreateInfo->enabledExtensionCount; i++)
-         exts[ext_count++] = args->pCreateInfo->ppEnabledExtensionNames[i];
+      for (uint32_t i = 0; i < args->pCreateInfo->enabledExtensionCount; i++) {
+         const char *name = args->pCreateInfo->ppEnabledExtensionNames[i];
+
+         /* the guest may enable what we only emulate; the host has no such
+          * extension and would fail vkCreateDevice on it
+          */
+         if (physical_dev->is_dma_buf_emulated &&
+             (!strcmp(name, VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME) ||
+              !strcmp(name, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME)))
+            continue;
+
+         exts[ext_count++] = name;
+      }
 
       if (physical_dev->EXT_external_memory_metal)
          exts[ext_count++] = "VK_EXT_external_memory_metal";
