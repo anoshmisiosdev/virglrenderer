@@ -118,9 +118,7 @@ if with_fuzzer
    subdir('fuzzer')
 endif
 
-# The neptune test forks the in-tree render server, so it only applies when
-# one is built here (not in a proxy-only client build).
-if with_neptune and build_render_server
+if with_neptune
    neptune_test_depends = [
       libvirglrenderer_dep,
    ]
