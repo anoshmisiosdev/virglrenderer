@@ -301,7 +301,35 @@ vkr_dispatch_vkAllocateMemory(struct vn_dispatch_context *dispatch,
    VkExportMemoryAllocateInfo local_export_info;
    VkImportMemoryMetalHandleInfoEXT local_metal_import;
 
-   if ((property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) && !res_info) {
+   /* The Metal path is the only way this host can hand memory out as an fd, so it
+    * has to cover everything the guest may want an fd for: host visible memory,
+    * which is always made exportable below, and any allocation the guest itself
+    * asked to export.  The latter is only ever a dma_buf request -- dma_buf is
+    * emulated on top of VK_EXT_external_memory_metal -- and is otherwise left to
+    * fall through to a host that supports no fd handle type at all.
+    */
+   const bool force_metal_import = physical_dev->EXT_external_memory_metal && !res_info &&
+                                   ((property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) ||
+                                    might_export);
+
+   if (force_metal_import) {
+      /* Allocate shm and wrap as a MTLBuffer for import. */
+      mtl_shm = vkr_mtl_shm_alloc(dev->mtl_device, alloc_info->allocationSize);
+      if (!mtl_shm) {
+         args->ret = VK_ERROR_OUT_OF_HOST_MEMORY;
+         return;
+      }
+
+      local_metal_import = (VkImportMemoryMetalHandleInfoEXT){
+         .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_METAL_HANDLE_INFO_EXT,
+         .pNext = alloc_info->pNext,
+         .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLBUFFER_BIT_EXT,
+         .handle = mtl_shm->mtl_buffer,
+      };
+      alloc_info->pNext = &local_metal_import;
+      alloc_info->allocationSize = mtl_shm->shm_size;
+      valid_fd_types = 1 << VIRGL_RESOURCE_FD_SHM;
+   } else if ((property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) && !res_info) {
       /* An implementation can support dma_buf import along with opaque fd export/import.
        * If the client driver is using external memory and requesting dma_buf, without
        * dma_buf fd export support, we must use gbm bo import path instead of forcing
@@ -349,23 +377,6 @@ vkr_dispatch_vkAllocateMemory(struct vn_dispatch_context *dispatch,
                   align(alloc_info->allocationSize, getpagesize());
             }
          }
-      } else if (physical_dev->EXT_external_memory_metal) {
-         /* Allocate shm and wrap as a MTLBuffer for import. */
-         mtl_shm = vkr_mtl_shm_alloc(dev->mtl_device, alloc_info->allocationSize);
-         if (!mtl_shm) {
-            args->ret = VK_ERROR_OUT_OF_HOST_MEMORY;
-            return;
-         }
-
-         local_metal_import = (VkImportMemoryMetalHandleInfoEXT){
-            .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_METAL_HANDLE_INFO_EXT,
-            .pNext = alloc_info->pNext,
-            .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLBUFFER_BIT_EXT,
-            .handle = mtl_shm->mtl_buffer,
-         };
-         alloc_info->pNext = &local_metal_import;
-         alloc_info->allocationSize = mtl_shm->shm_size;
-         valid_fd_types = 1 << VIRGL_RESOURCE_FD_SHM;
       } else if (physical_dev->EXT_external_memory_dma_buf) {
          /* Allocate dma_buf externally and force to import. */
          if (export_info) {
