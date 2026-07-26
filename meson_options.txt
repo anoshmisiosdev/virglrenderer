@@ -65,6 +65,13 @@ option(
 )
 
 option(
+  'vtest',
+  type : 'boolean',
+  value : 'true',
+  description : 'build the vtest standalone test server'
+)
+
+option(
   'neptune',
   type : 'boolean',
   value : 'false',

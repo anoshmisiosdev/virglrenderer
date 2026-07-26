@@ -471,7 +471,8 @@ if with_unstable_apis
 endif
 
 subdir('src')
-if not with_host_windows
+with_vtest = get_option('vtest') and not with_host_windows
+if with_vtest
    subdir('vtest')
 endif
 
@@ -503,6 +504,7 @@ summary({'c_args': (' ').join(get_option('c_args')),
         'drm-msm': with_drm_msm,
         'render server worker': with_render_server ? with_render_server_worker : 'none',
         'video': with_video,
+        'vtest': with_vtest,
         'tests': with_tests,
         'fuzzer': with_fuzzer,
         'tracing': with_tracing,
