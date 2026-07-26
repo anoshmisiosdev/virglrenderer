@@ -33,6 +33,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #if defined(HAVE_MEMFD_CREATE) || defined(__FreeBSD__) ||                      \
@@ -43,6 +44,13 @@
 #include <linux/memfd.h>
 #else
 #include <stdio.h>
+#endif
+
+#if defined(__APPLE__)
+#include <sys/posix_shm.h>
+/* An app group prefix must leave room for "/", a slot digit and one nonce
+ * digit within PSHMNAMLEN. */
+#define APP_SANDBOX_GROUP_ID_MAX (PSHMNAMLEN - 3)
 #endif
 
 #if !(defined(__FreeBSD__) || defined(HAVE_MEMFD_CREATE) ||                    \
@@ -129,12 +137,36 @@ os_create_anonymous_file(off_t size, const char *debug_name)
 #elif defined(__FreeBSD__)
    fd = shm_open(SHM_ANON, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
 #elif defined(__APPLE__)
+   /* Under App Sandbox a shm name must live in the app group container, i.e.
+    * be prefixed with the group identifier instead of '/'; anything else is
+    * denied.  The PSHMNAMLEN budget then leaves no room for a debug tag or
+    * the pid, so the name is just a slot digit plus as much of the nonce as
+    * fits. */
+   const char *group = getenv("APP_SANDBOX_GROUP_ID");
+   if (group && !group[0])
+      group = NULL;
+   if (group && strlen(group) > APP_SANDBOX_GROUP_ID_MAX) {
+      fprintf(stderr, "APP_SANDBOX_GROUP_ID is %zu chars, at most %d fit\n",
+              strlen(group), APP_SANDBOX_GROUP_ID_MAX);
+      errno = EINVAL;
+      return -1;
+   }
+
    const char *tag = (debug_name && debug_name[0]) ? debug_name : "mesa";
-   const unsigned int nonce = arc4random();
+   const size_t nonce_room = group ? PSHMNAMLEN - strlen(group) - 2 : 8;
+   const unsigned int nonce_digits = nonce_room < 8 ? (unsigned int)nonce_room : 8;
+   const unsigned int nonce = arc4random() >> (32 - 4 * nonce_digits);
    for (unsigned int i = 0; i < 32; i++) {
      char shm_name[64];
-     snprintf(shm_name, sizeof(shm_name), "/%s-%d-%x-%x", tag, getpid(), nonce,
-              i);
+     if (group) {
+       /* the slot must stay a single hex digit to fit the name budget */
+       if (i > 0xf)
+         break;
+       snprintf(shm_name, sizeof(shm_name), "%s/%x%x", group, i, nonce);
+     } else {
+       snprintf(shm_name, sizeof(shm_name), "/%s-%d-%x-%x", tag, getpid(),
+                nonce, i);
+     }
      fd = shm_open(shm_name, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
      if (fd >= 0) {
        shm_unlink(shm_name);
