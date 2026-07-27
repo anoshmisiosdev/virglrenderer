@@ -133,7 +133,9 @@ static const struct vkr_renderer_callbacks render_state_vkr_cbs = {
 
 #ifdef ENABLE_NEPTUNE
 static const struct npt_renderer_callbacks render_state_npt_cbs = {
+#ifndef ENABLE_SAME_PROCESS_RENDER_SERVER
    .debug_logger = render_state_cb_debug_logger,
+#endif
    .retire_fence = render_state_cb_retire_fence,
 };
 #endif
