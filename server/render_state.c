@@ -38,6 +38,13 @@ struct render_state {
    /* track and init/fini just once */
    int init_count;
 
+   /* Which renderers init actually brought up.  init is gated on
+    * want_venus / want_neptune, so fini must be gated the same way:
+    * calling vkr_renderer_fini() in a Neptune-only worker walks an
+    * uninitialised (NULL) vkr_state.contexts list head and segfaults. */
+   bool venus_inited;
+   bool neptune_inited;
+
    /* track the render_context */
    struct list_head contexts;
 };
@@ -162,11 +169,15 @@ render_state_fini(void)
       state.init_count--;
       if (!state.init_count) {
 #ifdef ENABLE_VENUS
-         vkr_renderer_fini();
+         if (state.venus_inited)
+            vkr_renderer_fini();
 #endif
 #ifdef ENABLE_NEPTUNE
-         npt_renderer_fini();
+         if (state.neptune_inited)
+            npt_renderer_fini();
 #endif
+         state.venus_inited = false;
+         state.neptune_inited = false;
          virgl_fence_table_cleanup();
       }
    }
@@ -220,6 +231,8 @@ render_state_init(uint32_t init_flags)
       }
 #endif
       list_inithead(&state.contexts);
+      state.venus_inited = want_venus;
+      state.neptune_inited = want_neptune;
    }
 
    state.init_count++;
