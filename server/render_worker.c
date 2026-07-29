@@ -274,23 +274,35 @@ render_worker_jail_reap_any_worker(struct render_worker_jail *jail, bool block)
    if (!pid)
       return NULL;
 
+   struct render_worker *reaped = NULL;
+   list_for_each_entry (struct render_worker, worker, &jail->workers, head) {
+      if (worker->pid == pid) {
+         worker->reaped = true;
+         reaped = worker;
+         break;
+      }
+   }
+
    /* A worker dying abnormally strands its guest context on dead rings
-    * (the app spins forever); make such exits loud. */
-   if (siginfo.si_code == CLD_KILLED || siginfo.si_code == CLD_DUMPED)
+    * (the app spins forever); make such exits loud.
+    *
+    * But destroying a context SIGKILLs its worker by design (see
+    * render_worker_destroy: "kill to make sure the worker exits in finite
+    * time"), and that is by far the common case -- tens of times per session.
+    * Reporting our own kill as a death made every teardown look like a crash
+    * and buried the real ones, so say nothing when we are the killer. */
+   const bool killed_by_us = reaped && reaped->destroyed;
+   if ((siginfo.si_code == CLD_KILLED && !killed_by_us) ||
+       siginfo.si_code == CLD_DUMPED)
       render_log("worker %d DIED on signal %d%s", pid, siginfo.si_status,
                  siginfo.si_code == CLD_DUMPED ? " (core dumped)" : "");
    else if (siginfo.si_code == CLD_EXITED && siginfo.si_status != 0)
       render_log("worker %d exited with status %d", pid, siginfo.si_status);
 
-   list_for_each_entry (struct render_worker, worker, &jail->workers, head) {
-      if (worker->pid == pid) {
-         worker->reaped = true;
-         return worker;
-      }
-   }
+   if (!reaped)
+      render_log("unknown child process %d", pid);
 
-   render_log("unknown child process %d", pid);
-   return NULL;
+   return reaped;
 #endif
 }
 
