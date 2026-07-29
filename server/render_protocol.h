@@ -154,6 +154,11 @@ struct render_context_op_create_resource_reply {
    uint32_t map_info; /* VIRGL_RENDERER_MAP_* */
    /* vulkan_info is set if the fd_type is VIRGL_RESOURCE_FD_OPAQUE */
    struct virgl_resource_vulkan_info vulkan_info;
+   /* enum virgl_formats the exporting context created the texture with,
+    * or 0 if unknown.  The client cannot derive this: the blob crosses
+    * to it as a bare fd, and the guest's own idea of the format is a
+    * depth/bpp guess with no channel order in it. */
+   uint32_t export_format;
    /* followed by 1 fd if not VIRGL_RESOURCE_FD_INVALID */
 };
 

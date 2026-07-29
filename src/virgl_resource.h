@@ -105,6 +105,20 @@ struct virgl_resource {
 
    struct virgl_resource_vulkan_info vulkan_info;
 
+   /**
+    * For a blob exported by a Neptune/Venus context, the enum
+    * virgl_formats the exporter created the texture with, or 0 if
+    * unknown.
+    *
+    * Not redundant with the format an importer supplies: a cross-process
+    * blob reaches its importer as a bare dmabuf, and DRI3's
+    * PixmapFromBuffer carries only depth/bpp -- no fourcc, no channel
+    * order -- so the importer can only guess, and always guesses the
+    * screen visual's BGRA.  Consumers that build a texture over these
+    * bytes need this instead.
+    */
+   uint32_t export_format;
+
    void *private_data;
 };
 
@@ -145,7 +159,8 @@ virgl_resource_create_from_fd(uint32_t res_id,
                               int fd,
                               const struct iovec *iov,
                               int iov_count,
-                              const struct virgl_resource_vulkan_info *vulkan_info);
+                              const struct virgl_resource_vulkan_info *vulkan_info,
+                              uint32_t export_format);
 
 struct virgl_resource *
 virgl_resource_create_from_opaque_handle(struct virgl_context *ctx,

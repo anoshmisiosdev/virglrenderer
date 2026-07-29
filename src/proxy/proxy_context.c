@@ -433,6 +433,8 @@ proxy_context_get_blob(struct virgl_context *base,
    if (reply.fd_type == VIRGL_RESOURCE_FD_OPAQUE)
       blob->vulkan_info = reply.vulkan_info;
 
+   blob->export_format = reply.export_format;
+
    proxy_context_resource_add(ctx, res_id);
 
    return 0;

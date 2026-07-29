@@ -70,7 +70,8 @@ npt_renderer_create_resource(uint32_t ctx_id,
                              uint32_t blob_flags,
                              enum virgl_resource_fd_type *out_fd_type,
                              int *out_res_fd,
-                             uint32_t *out_map_info);
+                             uint32_t *out_map_info,
+                             uint32_t *out_export_format);
 
 bool
 npt_renderer_import_resource(uint32_t ctx_id,

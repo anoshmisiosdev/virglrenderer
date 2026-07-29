@@ -21,6 +21,8 @@
 
 #include "c11/threads.h"
 
+#include "virgl_hw.h"
+
 #include "npt_context.h"
 #include "npt_transport_defs.h"
 
@@ -29,6 +31,33 @@
 
 /* D3D11_BIND_SHADER_RESOURCE (d3d11.h); consumers sample the texture. */
 #define NPT_D3D11_BIND_SHADER_RESOURCE 0x8u
+
+/* The exporting backend's own description of the texture format.  The
+ * Darwin backend records the DXGI format directly; the dxvk backend
+ * carries it in the shared-resource metadata. */
+#ifdef __APPLE__
+#define NPT_SHARED_EXPORT_FORMAT(d) ((d)->dxgi_format)
+#else
+#define NPT_SHARED_EXPORT_FORMAT(d) ((d)->meta.Format)
+#endif
+
+/* DXGI_FORMAT -> enum virgl_formats, for the 8-bit RGBA/BGRA families
+ * that can back a presentable surface.  0 means "unmapped", which leaves
+ * the importer's own format in charge. */
+static uint32_t
+npt_shared_dxgi_to_virgl_format(uint32_t dxgi_format)
+{
+   switch (dxgi_format) {
+   case 87: /* DXGI_FORMAT_B8G8R8A8_UNORM */
+      return VIRGL_FORMAT_B8G8R8A8_UNORM;
+   case 88: /* DXGI_FORMAT_B8G8R8X8_UNORM */
+      return VIRGL_FORMAT_B8G8R8X8_UNORM;
+   case 28: /* DXGI_FORMAT_R8G8B8A8_UNORM */
+      return VIRGL_FORMAT_R8G8B8A8_UNORM;
+   default:
+      return 0;
+   }
+}
 
 #ifdef __APPLE__
 /* The POD both darwin backends hand through GetSharedHandle /
@@ -155,6 +184,12 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
    const uint64_t export_size = desc->allocationSize;
 #endif
 
+   /* The channel order the exporter actually used.  An importer cannot
+    * derive it: DRI3 carries no fourcc, so it can only guess from
+    * depth/bpp and always guesses the screen visual's BGRA. */
+   const uint32_t export_virgl_format =
+      npt_shared_dxgi_to_virgl_format(NPT_SHARED_EXPORT_FORMAT(desc));
+
    /* Publish the export-level facts into the exporter's shmem window. */
    struct npt_resource *data_res = npt_context_get_resource(ctx, data_res_id);
    if (!data_res || data_res->fd_type != VIRGL_RESOURCE_FD_SHM ||
@@ -181,7 +216,8 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
    }
    if (!npt_context_register_pending_blob(ctx, blob_id,
                                           NPT_SHARED_FD_TYPE, fd,
-                                          export_size)) {
+                                          export_size,
+                                          export_virgl_format)) {
       close(fd);
       return NPT_E_FAIL;
    }

@@ -14106,6 +14106,12 @@ vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
             virgl_warn("%s: ignoring plane_count = %d and using the first one\n",
                        __func__, args->plane_count);
          }
+         /* args->format is the importer's guess (always the screen
+          * visual's BGRA, since DRI3 carries no channel order), so the
+          * exporter's own format wins where it is known.  metal_native
+          * below suppresses the compensating red/blue swizzle because a
+          * Metal-backed resource is expected to be channel-correct
+          * already; this is what makes that hold. */
          const struct vrend_metal_texture_description desc = {
             .width = args->width,
             .height = args->height,
@@ -14113,7 +14119,7 @@ vrend_renderer_pipe_resource_set_type(struct vrend_context *ctx,
             .offset = args->plane_offsets[0],
             .bind = args->bind,
             .usage = args->usage,
-            .format = args->format,
+            .format = res->export_format ? res->export_format : args->format,
          };
          MTLTexture_id texture;
 

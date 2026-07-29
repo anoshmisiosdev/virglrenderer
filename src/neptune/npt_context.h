@@ -24,6 +24,9 @@ struct npt_pending_blob {
    enum virgl_resource_fd_type fd_type;
    int fd;
    uint64_t size;
+   /* enum virgl_formats the exporting context created the texture with,
+    * or 0 if unknown.  See virgl_resource::export_format. */
+   uint32_t virgl_format;
 };
 
 /* Sync Map/Unmap bookkeeping.  Keyed by (resource_id, subresource):
@@ -232,7 +235,8 @@ npt_context_register_pending_blob(struct npt_context *ctx,
                                   uint64_t blob_id,
                                   enum virgl_resource_fd_type fd_type,
                                   int fd,
-                                  uint64_t size);
+                                  uint64_t size,
+                                  uint32_t virgl_format);
 
 /* Wake any wait_ring waiter on \p ring_id whose target seqno is
  * reached.  Called after each dispatched command. */

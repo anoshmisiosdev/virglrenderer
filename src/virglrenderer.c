@@ -1245,7 +1245,8 @@ int virgl_renderer_resource_create_blob(const struct virgl_renderer_resource_cre
                                           blob.u.fd,
                                           args->iovecs,
                                           args->num_iovs,
-                                          &blob.vulkan_info);
+                                          &blob.vulkan_info,
+                                          blob.export_format);
       if (!res)
          return -ENOMEM;
    } else {
@@ -1509,7 +1510,8 @@ virgl_renderer_resource_import_blob(const struct virgl_renderer_resource_import_
                                        args->fd,
                                        NULL,
                                        0,
-                                       NULL);
+                                       NULL,
+                                       0 /* format not known here */);
    if (!res)
       return -ENOMEM;
 
@@ -1559,13 +1561,17 @@ virgl_renderer_create_handle_for_scanout(uint32_t res_id,
     * displays scanouts; render-server builds have no EGL device.
     */
    if (res->fd_type == VIRGL_RESOURCE_FD_SHM) {
+      /* For a cross-process blob the caller's format is a depth/bpp-derived
+       * guess, so the exporter's own format wins where it is known.  A
+       * scanout never passes through vrend_resource_needs_redblue_swizzle,
+       * so this is the only place the channel order can be corrected. */
       struct vrend_metal_texture_description desc = {
          .width = width,
          .height = height,
          .stride = stride,
          .offset = offset,
          .usage = PIPE_USAGE_IMMUTABLE,
-         .format = virgl_format,
+         .format = res->export_format ? res->export_format : virgl_format,
       };
       MTLTexture_id tex;
 
