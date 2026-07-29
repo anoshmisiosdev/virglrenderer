@@ -16,6 +16,17 @@ int virgl_fence_get_fd(uint64_t fence_id);
 int virgl_fence_get_last_signalled_fence_fd(void);
 
 /*
+ * Entries are otherwise only dropped by the opportunistic sweep in
+ * virgl_fence_set_fd(), which reaps whatever has become readable -- so an fd
+ * that never signals is never reaped.  Whoever knows an entry is finished with
+ * says so with one of these: take_fd hands the fd over (one-shot hand-off to a
+ * single known consumer), retire just drops it (the fence is done, by whatever
+ * means, and nobody will ask for its fd again).
+ */
+int virgl_fence_take_fd(uint64_t fence_id);
+void virgl_fence_retire(uint64_t fence_id);
+
+/*
  * virtio-gpu fences live on per-ring timelines, so a fence's identity is the
  * (ring_index, seqno) pair: the seqno alone repeats across rings (every ring's
  * timeline starts at 1).  The render-server fd hand-off registers a fence fd

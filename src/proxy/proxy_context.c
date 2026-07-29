@@ -132,6 +132,12 @@ proxy_context_retire_timeline_fences_locked(struct proxy_context *ctx,
 
       ctx->base.fence_retire(&ctx->base, ring_idx, fence->fence_id);
 
+      /* The fence is done; drop the fd submit_fence registered for it (see
+       * virgl_fence_retire).  Retirement here is driven by the timeline, not
+       * by the fd, so nothing else will ever drop it -- and force_retire_all
+       * retires precisely the fences whose fd is never going to signal. */
+      virgl_fence_retire(fence->fence_id);
+
       list_del(&fence->head);
       proxy_context_free_fence(ctx, fence);
    }
@@ -560,8 +566,11 @@ proxy_context_destroy(struct virgl_context *base)
    if (ctx->timeline_seqnos) {
       for (uint32_t i = 0; i < PROXY_CONTEXT_TIMELINE_COUNT; i++) {
          struct proxy_timeline *timeline = &ctx->timelines[i];
-         list_for_each_entry_safe (struct proxy_fence, fence, &timeline->fences, head)
+         list_for_each_entry_safe (struct proxy_fence, fence, &timeline->fences, head) {
+            /* Never retired, so nothing dropped their registered fds. */
+            virgl_fence_retire(fence->fence_id);
             free(fence);
+         }
       }
    }
    mtx_destroy(&ctx->timeline_mutex);

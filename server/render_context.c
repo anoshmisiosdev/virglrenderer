@@ -43,10 +43,20 @@ render_context_dispatch_submit_fence(struct render_context *ctx,
                                         req->ring_index, req->seqno);
 
    /* Key by the fence's (ring_index, seqno) identity; the seqno alone repeats
-    * across rings, so it can't distinguish fds registered on different rings. */
-   int fence_fd = ok ? virgl_fence_get_fd(
-                          virgl_fence_ring_key(req->ring_index, req->seqno))
-                     : -1;
+    * across rings, so it can't distinguish fds registered on different rings.
+    *
+    * TAKE rather than get: in the render server the table is a one-shot
+    * hand-off from the backend's submit, which registers the fd inside
+    * render_state_submit_fence(), to here, its only consumer.  Left behind, an
+    * entry is reaped only by the readable-sweep in virgl_fence_set_fd(), which
+    * never reaches an fd that does not signal.  Taken unconditionally so a
+    * failed submit that registered one before failing does not strand it. */
+   int fence_fd =
+      virgl_fence_take_fd(virgl_fence_ring_key(req->ring_index, req->seqno));
+   if (!ok && fence_fd >= 0) {
+      close(fence_fd);
+      fence_fd = -1;
+   }
 
    struct render_context_op_submit_fence_reply reply = {
       .ok = ok,

@@ -183,6 +183,70 @@ virgl_fence_get_fd(uint64_t fence_id)
    return fd;
 }
 
+/* Remove fence_id's entry and return its fd, or -1 if absent.  Caller owns
+ * the fd.  Caller holds virgl_fence_table_lock. */
+static int
+virgl_fence_take_fd_locked(uint64_t fence_id)
+{
+   struct virgl_fence *fence =
+      _mesa_hash_table_u64_search(virgl_fence_table, fence_id);
+   if (!fence)
+      return -1;
+
+   const int fd = fence->fd;
+   _mesa_hash_table_u64_remove(virgl_fence_table, fence_id);
+   free(fence);
+
+   return fd;
+}
+
+/*
+ * Like virgl_fence_get_fd(), but REMOVES the entry: the fd itself is handed to
+ * the caller rather than a dup.
+ *
+ * Reaping is otherwise opportunistic -- virgl_fence_set_fd() sweeps for fds
+ * that have become readable, and nothing else drops an entry -- so a fence
+ * whose fd never signals stays forever, holding that fd and re-reporting
+ * itself as stuck every 10 seconds.  A caller that knows an entry has served
+ * its purpose must therefore say so.
+ *
+ * Use this where the table is a one-shot hand-off to a single known consumer;
+ * use virgl_fence_retire() where the fd is simply no longer of interest.
+ *
+ * Function is thread-safe.
+ */
+int
+virgl_fence_take_fd(uint64_t fence_id)
+{
+   mtx_lock(&virgl_fence_table_lock);
+   const int fd = virgl_fence_take_fd_locked(fence_id);
+   mtx_unlock(&virgl_fence_table_lock);
+
+   return fd;
+}
+
+/*
+ * Drop fence_id's entry (closing its fd) now that the fence has retired,
+ * however it retired -- signalled, timed out as device-lost, or torn down
+ * with its context.  A no-op for a fence that has no entry.
+ *
+ * last_signalled_fence is deliberately NOT updated here: retirement is not
+ * evidence the fd ever signalled, and virgl_renderer_export_signalled_fence()
+ * promises a fence that did.
+ *
+ * Function is thread-safe.
+ */
+void
+virgl_fence_retire(uint64_t fence_id)
+{
+   mtx_lock(&virgl_fence_table_lock);
+   const int fd = virgl_fence_take_fd_locked(fence_id);
+   mtx_unlock(&virgl_fence_table_lock);
+
+   if (fd >= 0)
+      close(fd);
+}
+
 /*
  * Returns sync file FD for the latest signalled fence. Caller of this
  * function  takes ownership of the returned FD and is responsible for
