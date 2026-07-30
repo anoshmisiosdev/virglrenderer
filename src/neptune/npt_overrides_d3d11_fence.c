@@ -27,7 +27,7 @@ npt_override_DC4_Signal(struct npt_dispatch_context *dctx,
 
    if (NPT_SUCCEEDED(args->ret) && args->pFence) {
       npt_feedback_fence_mark_signal(npt_context_from_dispatch(dctx),
-                                     args->pFence);
+                                     args->pFence, args->Value);
    }
 
    return args->ret;

@@ -166,6 +166,7 @@ npt_feedback_register_locked(struct npt_context *ctx,
       entry->host_ctx = NULL;
       entry->cookie = 0;
       entry->version = 0;
+      entry->target_value = 0;
       entry->persistent = false;
       /* Keep mutex held: caller sets type-specific fields then calls
        * npt_feedback_state_unlock. */
@@ -227,11 +228,6 @@ npt_feedback_query_poll_one(struct npt_context *ctx,
 static bool
 npt_feedback_fence_poll_one(struct npt_context *ctx,
                             struct npt_feedback_entry *entry);
-
-/* Rate-limit for between-commands polling.  1 ms keeps poll CPU
- * below 1% even with a deep pending list while staying well under a
- * frame interval. */
-#define NPT_FEEDBACK_POLL_INTERVAL_NS (1000000ull)
 
 void
 npt_feedback_poll(struct npt_context *ctx)
@@ -393,6 +389,12 @@ npt_feedback_query_mark_end(struct npt_context *ctx,
       npt_feedback_set_pending_locked(ctx, match);
    }
    npt_feedback_state_unlock(ctx);
+
+   /* Only a ring thread polls, and it may be parked; tell it a poll is
+    * owed.  After the state unlock: npt_ring_notify_feedback() takes
+    * ring->mutex, which the poll path nests the other way round. */
+   if (match)
+      npt_context_notify_rings_feedback(ctx);
 }
 
 /* ================================================================== */
@@ -424,7 +426,8 @@ npt_feedback_fence_register(struct npt_context *ctx,
 }
 
 void
-npt_feedback_fence_mark_signal(struct npt_context *ctx, void *host_fence)
+npt_feedback_fence_mark_signal(struct npt_context *ctx, void *host_fence,
+                               uint64_t value)
 {
    if (!ctx || !host_fence || !ctx->feedback.table)
       return;
@@ -452,17 +455,35 @@ npt_feedback_fence_mark_signal(struct npt_context *ctx, void *host_fence)
          }
       }
    }
-   if (entry)
+   if (entry) {
+      /* Raise the bar the poller has to clear before it may drop this
+       * entry.  Signals can be dispatched out of order relative to GPU
+       * execution, so only ever move the target forward. */
+      if (value > entry->target_value)
+         entry->target_value = value;
       npt_feedback_set_pending_locked(ctx, entry);
+   }
    npt_feedback_state_unlock(ctx);
+
+   /* An armed entry is only ever observed by a ring thread's idle-gap
+    * poll, and that thread may be parked in an unbounded wait.  Signal
+    * usually runs on the ring thread itself, but dispatch can come from
+    * elsewhere, so tell every ring a poll is owed rather than relying on
+    * that.  After the state unlock: npt_ring_notify_feedback() takes
+    * ring->mutex, which the poll path nests the other way round. */
+   if (entry)
+      npt_context_notify_rings_feedback(ctx);
 }
 
 /* Per-type poller for fences.  Caller holds feedback state lock.
  *
- * Returns false unconditionally: fence entries are persistent and
- * stay on the pending list for the fence's lifetime, so every poll
- * cycle observes the latest GetCompletedValue and updates the slot
- * in place. */
+ * Publishes the latest GetCompletedValue, then reports whether this
+ * entry is done owing polls: true once the completed value has caught up
+ * to the highest signalled target, false while an advance is still
+ * outstanding.  Dropping the entry from pending loses nothing -- it
+ * lives in the table until UNREGISTER and the next Signal re-arms it --
+ * and lets pending_count reach zero, which is what a ring thread needs
+ * to park rather than poll. */
 static bool
 npt_feedback_fence_poll_one(struct npt_context *ctx,
                             struct npt_feedback_entry *entry)
@@ -489,5 +510,5 @@ npt_feedback_fence_poll_one(struct npt_context *ctx,
    const UINT64 val = get_completed_value(entry->host_obj);
    atomic_store_explicit(&slot->completed_value, (uint64_t)val,
                          memory_order_release);
-   return false; /* persistent: never auto-remove from pending */
+   return (uint64_t)val >= entry->target_value;
 }

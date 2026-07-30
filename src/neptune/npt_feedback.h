@@ -56,9 +56,14 @@ enum npt_feedback_type {
  *               into the slot so a poll racing Begin sees a mismatch.
  *               Fences: the slot's completed_value plays the version
  *               role itself.
- *   persistent  True for fences (entry stays pending; each poll
- *               updates in place).  False for queries (one Begin/End
- *               cycle = one poll = one removal).
+ *   persistent  True for fences: the entry lives in the TABLE for the
+ *               object's lifetime (until UNREGISTER).  This says nothing
+ *               about the pending list -- see target_value.  False for
+ *               queries (one Begin/End cycle = one poll = one removal).
+ *   target_value Fences only: highest value passed to DC4::Signal.  The
+ *               entry leaves the pending list once completed_value
+ *               reaches it, so pending_count means "polls still owed"
+ *               rather than "a fence exists"; the next Signal re-arms it.
  *   pending     True while in the per-state pending list.
  *   pending_head List node into npt_feedback_state::pending.
  */
@@ -76,6 +81,8 @@ struct npt_feedback_entry {
 
    uint32_t cookie;
    uint32_t version;
+
+   uint64_t target_value;
 
    bool persistent;
    bool pending;
@@ -157,6 +164,12 @@ npt_feedback_slot_ptr(struct npt_resource *res,
                       uint32_t offset,
                       uint32_t size);
 
+/* Rate-limit for between-commands polling.  1 ms keeps poll CPU below
+ * 1% even with a deep pending list while staying well under a frame
+ * interval.  Also the bound the ring thread's idle wait uses while a
+ * poll is owed, so the two cadences cannot drift apart. */
+#define NPT_FEEDBACK_POLL_INTERVAL_NS (1000000ull)
+
 /* Poll all pending entries (rate-limited internally to ~1 KHz).
  * Called from the dispatch loop between commands; no-op on an empty
  * pending list. */
@@ -188,9 +201,13 @@ void npt_feedback_fence_register(struct npt_context *ctx,
                                  uint32_t fb_offset);
 
 /* Called from the DC4::Signal dispatch override after the host call
- * succeeds; host_fence is already resolved by the dispatcher.  No-op
- * on miss. */
+ * succeeds; host_fence is already resolved by the dispatcher.  `value`
+ * is the value being signalled: it raises the entry's target_value, and
+ * the poller drops the entry from pending once GetCompletedValue reaches
+ * it.  Wakes the context's ring threads so an entry armed off the ring
+ * thread can never be left unpolled.  No-op on miss. */
 void npt_feedback_fence_mark_signal(struct npt_context *ctx,
-                                    void *host_fence);
+                                    void *host_fence,
+                                    uint64_t value);
 
 #endif /* NPT_FEEDBACK_H */

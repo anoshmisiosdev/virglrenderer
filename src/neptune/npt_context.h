@@ -245,6 +245,13 @@ npt_context_on_ring_seqno_update(struct npt_context *ctx,
                                  uint64_t ring_id,
                                  uint32_t ring_seqno);
 
+/* Tell every ring thread of this context that a feedback poll is owed,
+ * so an entry armed off the ring thread can never be left unpolled.
+ * Must NOT be called holding the feedback state lock (it takes
+ * ring->mutex, which the poll path nests the other way round). */
+void
+npt_context_notify_rings_feedback(struct npt_context *ctx);
+
 /* Mark the context fatal and wake any wait_ring waiter. */
 void
 npt_context_on_ring_fatal(struct npt_context *ctx);

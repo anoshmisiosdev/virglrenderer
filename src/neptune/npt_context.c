@@ -553,6 +553,30 @@ npt_context_get_wait_ring_seqno(struct npt_context *ctx,
    return wait_ring;
 }
 
+static void
+npt_context_wake_rings(struct npt_context *ctx,
+                       void (*wake)(struct npt_ring *ring))
+{
+   mtx_lock(&ctx->ring_mutex);
+   list_for_each_entry(struct npt_ring, r, &ctx->rings, head) {
+      wake(r);
+   }
+   mtx_unlock(&ctx->ring_mutex);
+}
+
+/* A feedback entry can be armed from a thread other than the ring
+ * thread that will poll it, and a ring thread with an empty pending list
+ * parks in an unbounded wait.  Without this the entry would sit unpolled
+ * and the guest would wait forever on a value that is never published. */
+void
+npt_context_notify_rings_feedback(struct npt_context *ctx)
+{
+   if (!ctx)
+      return;
+
+   npt_context_wake_rings(ctx, npt_ring_notify_feedback);
+}
+
 void
 npt_context_on_ring_fatal(struct npt_context *ctx)
 {
@@ -564,13 +588,7 @@ npt_context_on_ring_fatal(struct npt_context *ctx)
 
    /* Wake any ring thread parked in WAIT_VIRTQUEUE_SEQNO or idle so
     * it observes the fatal flag (both waits share ring->mutex/cond). */
-   mtx_lock(&ctx->ring_mutex);
-   list_for_each_entry(struct npt_ring, r, &ctx->rings, head) {
-      mtx_lock(&r->mutex);
-      cnd_broadcast(&r->cond);
-      mtx_unlock(&r->mutex);
-   }
-   mtx_unlock(&ctx->ring_mutex);
+   npt_context_wake_rings(ctx, npt_ring_wake);
 }
 
 /* Ring monitor (ALIVE-bit reporter) */

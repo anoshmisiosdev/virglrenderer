@@ -17,6 +17,7 @@
 
 #include "npt_context.h"
 #include "npt_cs.h"
+#include "npt_feedback.h"  /* NPT_FEEDBACK_POLL_INTERVAL_NS */
 #include "npt_library.h"   /* struct npt_d3d_library (workaround_flags) */
 #include "npt_profile.h"
 #include "npt_dispatch.h"
@@ -189,12 +190,14 @@ npt_ring_destroy(struct npt_ring *ring)
 void
 npt_ring_store_virtqueue_seqno(struct npt_ring *ring, uint64_t seqno)
 {
-   /* Monotonic.  The signal wakes both idle wait and
-    * wait_virtqueue_seqno (they share this mutex/cond). */
+   /* Monotonic.  Broadcast, not signal: the idle wait and every
+    * wait_virtqueue_seqno waiter share this mutex/cond and test
+    * different predicates, so a single wake could land on a waiter that
+    * just sleeps again and swallow it. */
    mtx_lock(&ring->mutex);
    if (seqno > ring->virtqueue_seqno)
       ring->virtqueue_seqno = seqno;
-   cnd_signal(&ring->cond);
+   cnd_broadcast(&ring->cond);
    mtx_unlock(&ring->mutex);
 }
 
@@ -220,6 +223,54 @@ npt_ring_now(void)
    if (clock_gettime(CLOCK_MONOTONIC, &now))
       return 0;
    return ns_per_sec * now.tv_sec + now.tv_nsec;
+}
+
+/* Feedback entries owe the idle-gap poll an advance.  A fence entry
+ * clears itself once GetCompletedValue catches up to the signalled
+ * target, so a nonzero count means a poll really is outstanding rather
+ * than merely "a fence is registered". */
+static bool
+npt_ring_feedback_pending(const struct npt_context *ctx)
+{
+   return atomic_load_explicit((_Atomic uint32_t *)&ctx->feedback.pending_count,
+                               memory_order_relaxed) != 0;
+}
+
+/* Bounded wait on ring->cond with a relative timeout.  Caller holds
+ * ring->mutex.
+ *
+ * c11 cnd_timedwait takes an absolute CLOCK_REALTIME deadline, so a
+ * backward wall-clock step lands the deadline that far in the future --
+ * and while a feedback poll is owed, that timeout is the only thing that
+ * will publish the value a guest thread is blocked on.  Both platform
+ * primitives below take a relative timeout off a clock that cannot step.
+ * The portable fallback is the c11 one and keeps that exposure. */
+static void
+npt_ring_cond_wait_ns(struct npt_ring *ring, uint64_t ns)
+{
+#if defined(_WIN32)
+   SleepConditionVariableCS(&ring->cond, &ring->mutex,
+                            (DWORD)(ns / 1000000ull));
+#else
+   const uint64_t ns_per_sec = 1000000000ull;
+#if defined(__APPLE__)
+   const struct timespec rel = {
+      .tv_sec = (time_t)(ns / ns_per_sec),
+      .tv_nsec = (long)(ns % ns_per_sec),
+   };
+   pthread_cond_timedwait_relative_np(&ring->cond, &ring->mutex, &rel);
+#else
+   struct timespec ts;
+   timespec_get(&ts, TIME_UTC);
+   ts.tv_sec += (time_t)(ns / ns_per_sec);
+   ts.tv_nsec += (long)(ns % ns_per_sec);
+   if (ts.tv_nsec >= (long)ns_per_sec) {
+      ts.tv_sec += 1;
+      ts.tv_nsec -= (long)ns_per_sec;
+   }
+   cnd_timedwait(&ring->cond, &ring->mutex, &ts);
+#endif
+#endif
 }
 
 static void
@@ -333,38 +384,58 @@ npt_ring_thread(void *arg)
    uint32_t relax_iter = 0;
    int ret = 0;
    while (ring->started) {
-      /* Persistent fence feedback needs continued polling while
-       * idle.  Queries self-clear but the count covers both. */
-      const bool feedback_pending =
-         atomic_load_explicit((_Atomic uint32_t *)&ctx->feedback.pending_count,
-                              memory_order_relaxed) != 0;
-
-      bool wait = false;
+      /* An empty ring past the idle timeout waits; feedback decides only
+       * whether the wait is bounded by the poll cadence. */
+      bool notified = false;
       if (npt_ring_now() >= last_submit + ring->idle_timeout) {
-         ring->pending_notify = false;
-         npt_ring_set_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
-         wait = ring->buffer.cur == npt_ring_load_tail(ring) &&
-                !feedback_pending;
-         if (!wait)
-            npt_ring_unset_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
-      }
-
-      if (wait) {
          const uint64_t idle_t0 =
             npt_profile_enabled() ? npt_profile_now_ns() : 0;
+
+         /* Clearing the flags, reading the tail and entering the wait
+          * all happen under ring->mutex -- the lock the notify helpers
+          * set those flags under.  That is what makes a notify arriving
+          * mid-decision unmissable: it either lands before the clear and
+          * is seen here, or it blocks on the mutex until this thread is
+          * inside the wait, where the broadcast reaches it. */
          mtx_lock(&ring->mutex);
-         if (ring->started && !ring->pending_notify)
-            cnd_wait(&ring->cond, &ring->mutex);
-         npt_ring_unset_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
+         ring->pending_notify = false;
+         /* A poll is owed if an entry is on the pending list or one was
+          * armed off this thread since the last look. */
+         const bool poll_owed =
+            ring->feedback_notify || npt_ring_feedback_pending(ctx);
+         ring->feedback_notify = false;
+
+         const bool wait = ring->buffer.cur == npt_ring_load_tail(ring);
+         if (wait) {
+            npt_ring_set_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
+            if (ring->started) {
+               if (poll_owed) {
+                  /* Sleep straight to the next poll deadline instead of
+                   * spending the yield/10us relax ramp to get there. */
+                  npt_ring_cond_wait_ns(ring, NPT_FEEDBACK_POLL_INTERVAL_NS);
+               } else {
+                  cnd_wait(&ring->cond, &ring->mutex);
+               }
+            }
+            npt_ring_unset_status_bits(ring, NPT_RING_STATUS_IDLE_BIT);
+         }
+         /* Only a guest doorbell puts the thread back on the hot path.
+          * A poll-cadence timeout or a feedback wake must not, or the
+          * thread drops out of the idle regime into the relax spin the
+          * wait exists to avoid -- so read the doorbell flag rather than
+          * the wait's return code, which cannot tell them apart. */
+         notified = ring->pending_notify;
          mtx_unlock(&ring->mutex);
 
-         if (npt_profile_enabled())
+         if (wait && npt_profile_enabled())
             npt_profile_record_idle_wait(&ring->profile,
                                          npt_profile_now_ns() - idle_t0);
 
          if (!ring->started)
             break;
+      }
 
+      if (notified) {
          last_submit = npt_ring_now();
          relax_iter = 0;
       }
@@ -412,7 +483,7 @@ npt_ring_thread(void *arg)
          /* Cap relax_iter while feedback is pending: GPU execution
           * of a queued Signal lags by ms, so longer sleeps would
           * miss the value advancing.  16 keeps the next sleep ~10 us. */
-         if (feedback_pending && relax_iter > 16)
+         if (npt_ring_feedback_pending(ctx) && relax_iter > 16)
             relax_iter = 16;
 
          const uint64_t relax_t0 =
@@ -454,7 +525,9 @@ npt_ring_stop(struct npt_ring *ring)
    }
    assert(ring->started);
    ring->started = false;
-   cnd_signal(&ring->cond);
+   /* Broadcast: the ring thread and any wait_virtqueue_seqno waiter
+    * both have to observe the cleared started flag. */
+   cnd_broadcast(&ring->cond);
    mtx_unlock(&ring->mutex);
 
    thrd_join(ring->thread, NULL);
@@ -467,7 +540,24 @@ npt_ring_notify(struct npt_ring *ring)
 {
    mtx_lock(&ring->mutex);
    ring->pending_notify = true;
-   cnd_signal(&ring->cond);
+   cnd_broadcast(&ring->cond);
+   mtx_unlock(&ring->mutex);
+}
+
+void
+npt_ring_notify_feedback(struct npt_ring *ring)
+{
+   mtx_lock(&ring->mutex);
+   ring->feedback_notify = true;
+   cnd_broadcast(&ring->cond);
+   mtx_unlock(&ring->mutex);
+}
+
+void
+npt_ring_wake(struct npt_ring *ring)
+{
+   mtx_lock(&ring->mutex);
+   cnd_broadcast(&ring->cond);
    mtx_unlock(&ring->mutex);
 }
 

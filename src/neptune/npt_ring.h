@@ -76,7 +76,16 @@ struct npt_ring {
    cnd_t cond;
    thrd_t thread;
    atomic_bool started;
+
+   /* Both guarded by ring->mutex: set there by the notify helpers,
+    * cleared and re-tested there by the ring thread's idle wait, which
+    * is what makes the wake-up unmissable.  Kept apart because they
+    * mean different things to that wait -- pending_notify says the
+    * guest submitted work, so the thread is back on the hot path;
+    * feedback_notify says a feedback entry needs one poll, which the
+    * thread does without leaving the idle regime. */
    atomic_bool pending_notify;
+   atomic_bool feedback_notify;
 
    /* Set when CREATE_RING's monitor_report_period_us is nonzero.
     * The per-context monitor thread OR-sets ALIVE on every flagged ring. */
@@ -124,8 +133,21 @@ npt_ring_start(struct npt_ring *ring);
 bool
 npt_ring_stop(struct npt_ring *ring);
 
+/* Guest doorbell: work is in the ring, so the thread leaves the idle
+ * regime. */
 void
 npt_ring_notify(struct npt_ring *ring);
+
+/* A feedback entry owes a poll.  Wakes an idle thread for that one poll
+ * without claiming the ring has work, so the idle regime survives. */
+void
+npt_ring_notify_feedback(struct npt_ring *ring);
+
+/* Wake every waiter on this ring so each re-tests its own predicate.
+ * Sets no flag: for state the waiters read directly, such as the
+ * context's fatal error. */
+void
+npt_ring_wake(struct npt_ring *ring);
 
 bool
 npt_ring_write_extra(struct npt_ring *ring, size_t offset, uint32_t val);
