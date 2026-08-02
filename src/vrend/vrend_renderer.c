@@ -1011,6 +1011,20 @@ static GLuint vrend_resource_get_internal_format_override(const struct vrend_res
    return GL_NONE;
 }
 
+/* Externally-backed bgra resources (EGL image / IOSurface / Metal texture) have
+ * a true BGRA8 internal format, unlike internally-allocated ones which use
+ * RGBA8 and are fed CPU-swizzled data. GLES forbids format conversion in
+ * TexSubImage, so these must be uploaded as GL_BGRA and left unswizzled.
+ * Resources with an internal format override are excluded: those are stored as
+ * 24bpp and go through the swizzle-and-collapse path instead. */
+static bool vrend_resource_uploads_bgra_directly(const struct vrend_resource *res)
+{
+   return vrend_state.use_gles &&
+         vrend_format_is_bgra(res->base.format) &&
+         has_bit(res->storage_bits, VREND_STORAGE_EGL_IMAGE) &&
+         vrend_resource_get_internal_format_override(res) == GL_NONE;
+}
+
 static bool vrend_resource_supports_view(const struct vrend_resource *res,
                                          UNUSED enum virgl_formats view_format)
 {
@@ -9561,7 +9575,10 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
          need_temp = true;
       }
 
-      if (vrend_state.use_gles && vrend_format_is_bgra(res->base.format))
+      /* The bgra->rgba swizzle is done in place, so it needs a scratch copy of
+       * the guest data; a direct bgra upload sends the guest data untouched. */
+      if (vrend_state.use_gles && vrend_format_is_bgra(res->base.format) &&
+          !vrend_resource_uploads_bgra_directly(res))
          need_temp = true;
 
       if (vrend_state.use_core_profile == true &&
@@ -9706,6 +9723,9 @@ static int vrend_renderer_transfer_write_iov(struct vrend_context *ctx,
                   }
                }
 
+            } else if (vrend_resource_uploads_bgra_directly(res)) {
+               VREND_DEBUG(dbg_bgra, ctx, "uploading bgra directly since storage is externally backed\n");
+               glformat = GL_BGRA;
             } else if (vrend_format_is_bgra(res->base.format)) {
                VREND_DEBUG(dbg_bgra, ctx, "manually swizzling bgra->rgba on upload since gles+bgra\n");
                vrend_swizzle_data_bgra(send_size, data);
@@ -10874,9 +10894,11 @@ static void vrend_resource_copy_fallback(struct vrend_resource *src_res,
        * storing in a texture. Iovec data is assumed to have the original byte-order, namely BGR*,
        * and needs to be reordered when storing in the host's texture memory as RGB*.
        * On the contrary, externally-stored BGR* resources are assumed to remain in BGR* format at
-       * all times.
+       * all times, so they keep the iovec byte-order and are uploaded as BGR* below.
        */
-      if (vrend_state.use_gles && vrend_format_is_bgra(dst_res->base.format))
+      if (vrend_resource_uploads_bgra_directly(dst_res))
+         glformat = GL_BGRA;
+      else if (vrend_state.use_gles && vrend_format_is_bgra(dst_res->base.format))
          vrend_swizzle_data_bgra(total_size, tptr);
    } else {
       uint32_t read_chunk_size;
