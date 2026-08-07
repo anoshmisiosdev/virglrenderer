@@ -235,6 +235,12 @@ npt_feedback_fence_poll_one(struct npt_context *ctx,
 void
 npt_feedback_poll(struct npt_context *ctx)
 {
+   npt_feedback_poll_interval(ctx, NPT_FEEDBACK_POLL_INTERVAL_NS);
+}
+
+void
+npt_feedback_poll_interval(struct npt_context *ctx, uint64_t min_interval_ns)
+{
    if (!ctx)
       return;
    struct npt_feedback_state *st = &ctx->feedback;
@@ -246,7 +252,7 @@ npt_feedback_poll(struct npt_context *ctx)
       return;
 
    const uint64_t now = npt_profile_now_ns();
-   if (now - st->last_poll_ns < NPT_FEEDBACK_POLL_INTERVAL_NS)
+   if (now - st->last_poll_ns < min_interval_ns)
       return;
 
    mtx_lock(&st->mutex);

@@ -173,16 +173,24 @@ npt_feedback_slot_ptr(struct npt_resource *res,
                       uint32_t offset,
                       uint32_t size);
 
-/* Rate-limit for between-commands polling.  1 ms keeps poll CPU below
- * 1% even with a deep pending list while staying well under a frame
- * interval.  Also the bound the ring thread's idle wait uses while a
- * poll is owed, so the two cadences cannot drift apart. */
-#define NPT_FEEDBACK_POLL_INTERVAL_NS (1000000ull)
+/* The poll interval is the resolution of every value the guest reads
+ * out of a feedback slot, so it directly quantizes the app's
+ * Signal-to-GetCompletedValue latency.  The same interval is used
+ * mid-stream and idle: publishing promptly during decode releases the
+ * app's pacing waits earlier, which is worth more than the poll costs
+ * the decode thread. */
+#define NPT_FEEDBACK_POLL_INTERVAL_NS      (100000ull)
+#define NPT_FEEDBACK_POLL_IDLE_INTERVAL_NS (100000ull)
 
 /* Poll all pending entries (rate-limited internally to ~1 KHz).
  * Called from the dispatch loop between commands; no-op on an empty
  * pending list. */
 void npt_feedback_poll(struct npt_context *ctx);
+
+/* Same, but with an explicit rate-limit -- the ring thread's idle loop
+ * passes NPT_FEEDBACK_POLL_IDLE_INTERVAL_NS. */
+void npt_feedback_poll_interval(struct npt_context *ctx,
+                                uint64_t min_interval_ns);
 
 /* ================================================================== */
 /* Query feedback                                                      */
