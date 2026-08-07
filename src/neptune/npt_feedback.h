@@ -110,7 +110,12 @@ struct npt_feedback_state {
    struct list_head pending;
    uint32_t pending_count;
 
-   /* Last poll wall-clock; drives the 1 ms rate-limit. */
+   /* Commands still to skip before the next deadline check; see
+    * NPT_FEEDBACK_POLL_CHECK_EVERY.  Heuristic only -- several ring
+    * threads share one context, so it is written racily on purpose. */
+   _Atomic uint32_t poll_skip;
+
+   /* Last poll wall-clock; drives the rate-limit. */
    uint64_t last_poll_ns;
    uint64_t total_poll_ns;
    uint64_t poll_count;
@@ -182,9 +187,18 @@ npt_feedback_slot_ptr(struct npt_resource *res,
 #define NPT_FEEDBACK_POLL_INTERVAL_NS      (100000ull)
 #define NPT_FEEDBACK_POLL_IDLE_INTERVAL_NS (100000ull)
 
-/* Poll all pending entries (rate-limited internally to ~1 KHz).
- * Called from the dispatch loop between commands; no-op on an empty
- * pending list. */
+/* How many decoded commands may pass between deadline checks on the
+ * mid-stream path.  The poll runs after every command and commands
+ * decode in ~1 us, so the clock read alone is a significant share of the
+ * decode thread; checking once per 32 holds the effective cadence within
+ * a few microseconds of the target at a thirty-second of the clock
+ * traffic.  The idle path (npt_feedback_poll_interval) does not skip and
+ * stays exact. */
+#define NPT_FEEDBACK_POLL_CHECK_EVERY 32u
+
+/* Poll all pending entries (rate-limited internally).  Called from the
+ * dispatch loop between commands; no-op on an empty pending list, and
+ * only checks the deadline every NPT_FEEDBACK_POLL_CHECK_EVERY calls. */
 void npt_feedback_poll(struct npt_context *ctx);
 
 /* Same, but with an explicit rate-limit -- the ring thread's idle loop

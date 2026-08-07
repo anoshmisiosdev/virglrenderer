@@ -13,6 +13,11 @@
 #include <time.h>
 #ifndef _WIN32
 #include <sys/resource.h>
+
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <sys/qos.h>
+#endif
 #endif
 
 #include "npt_context.h"
@@ -367,7 +372,33 @@ npt_ring_thread(void *arg)
    snprintf(thread_name, ARRAY_SIZE(thread_name), "npt-ring-%d", ctx->ctx_id);
    u_thread_setname(thread_name);
 
-#ifndef _WIN32
+#if defined(__APPLE__)
+   /* Darwin has no per-thread nice: setpriority(PRIO_PROCESS, 0, ...)
+    * is process-wide here (the "0 means calling thread" behaviour the
+    * guest value is meant for is a Linux extension), so honouring the
+    * guest's nice would renice the WHOLE render server -- every ring of
+    * every context in it -- on behalf of one guest thread.  Set the QoS
+    * class instead: it is per-thread and it, not nice, is what decides
+    * scheduling band and timer coalescing on macOS.
+    *
+    * USER_INTERACTIVE because this thread is on the frame's critical
+    * path (guest recording blocks on ring space while it drains, and
+    * command-buffer commits are only as timely as this loop).  Setting
+    * it explicitly also stops the render server from inheriting a
+    * background QoS from whatever launched QEMU. */
+   {
+      const int qos_rc =
+         pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+      static _Atomic bool qos_logged;
+      if (!atomic_exchange(&qos_logged, true)) {
+         qos_class_t got = QOS_CLASS_UNSPECIFIED;
+         pthread_get_qos_class_np(pthread_self(), &got, NULL);
+         npt_log("ring thread QoS: set rc=%d, effective class=0x%x "
+                 "(USER_INTERACTIVE=0x%x)", qos_rc, (unsigned)got,
+                 (unsigned)QOS_CLASS_USER_INTERACTIVE);
+      }
+   }
+#elif !defined(_WIN32)
    if (ring->prio_valid) {
       errno = 0;
       if (setpriority(PRIO_PROCESS, 0, ring->prio) == -1 && errno) {

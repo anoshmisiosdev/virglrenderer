@@ -235,6 +235,19 @@ npt_feedback_fence_poll_one(struct npt_context *ctx,
 void
 npt_feedback_poll(struct npt_context *ctx)
 {
+   if (!ctx)
+      return;
+   /* Amortize the deadline check; see NPT_FEEDBACK_POLL_CHECK_EVERY. */
+   struct npt_feedback_state *st = &ctx->feedback;
+   const uint32_t skip =
+      atomic_load_explicit(&st->poll_skip, memory_order_relaxed);
+   if (skip) {
+      atomic_store_explicit(&st->poll_skip, skip - 1, memory_order_relaxed);
+      return;
+   }
+   atomic_store_explicit(&st->poll_skip, NPT_FEEDBACK_POLL_CHECK_EVERY - 1,
+                         memory_order_relaxed);
+
    npt_feedback_poll_interval(ctx, NPT_FEEDBACK_POLL_INTERVAL_NS);
 }
 

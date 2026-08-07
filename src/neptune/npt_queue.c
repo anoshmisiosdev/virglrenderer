@@ -21,6 +21,11 @@
 #include "util/u_thread.h"
 #include "virgl_fence.h"
 
+#if defined(__APPLE__)
+#include <pthread.h>
+#include <sys/qos.h>
+#endif
+
 /* The host D3D library gives the sync path no DEVICE_LOST signal -- only
  * an fd, and for gates a fence value -- so a wall-clock budget is the
  * only way to stop a wedged producer from trapping the guest forever.
@@ -176,6 +181,14 @@ npt_queue_thread(void *arg)
    char thread_name[16];
    snprintf(thread_name, sizeof(thread_name), "npt-queue-%u", ctx->ctx_id);
    u_thread_setname(thread_name);
+
+#if defined(__APPLE__)
+   /* Per-thread QoS (see npt_ring_thread for why nice is not usable on
+    * Darwin).  This thread turns GPU completion into the guest's fence
+    * wake, so its scheduling delay lands directly in every waiter's
+    * latency. */
+   pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
 
    /* sync_thread.mutex protects the list; dropped across the poll,
     * reacquired before popping the entry. */
