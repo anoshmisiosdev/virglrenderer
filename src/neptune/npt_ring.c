@@ -570,11 +570,16 @@ bool
 npt_ring_stop(struct npt_ring *ring)
 {
    mtx_lock(&ring->mutex);
+   /* Nothing to join: ring->thread is only valid once npt_ring_start
+    * has run, and joining the zero value would fault. */
+   if (!ring->started) {
+      mtx_unlock(&ring->mutex);
+      return true;
+   }
    if (thrd_equal(ring->thread, thrd_current())) {
       mtx_unlock(&ring->mutex);
       return false;
    }
-   assert(ring->started);
    ring->started = false;
    /* Broadcast: the ring thread and any wait_virtqueue_seqno waiter
     * both have to observe the cleared started flag. */
@@ -771,12 +776,16 @@ npt_ring_create_from_cmd(struct npt_context *ctx,
 
    if (cmd->monitor_report_period_us &&
        !npt_context_ring_monitor_init(ctx, cmd->monitor_report_period_us)) {
-      /* The heartbeat above will never be refreshed without a live
-       * monitor thread, so fail loudly (decoder goes fatal, guest sees
-       * NPT_RING_STATUS_FATAL_BIT and tears down cleanly) rather than
-       * silently leaving the guest to spin its watchdog to a hard abort. */
+      /* Nothing will refresh that heartbeat without a monitor thread, so
+       * fail loudly and let the guest tear down rather than leave it
+       * spinning its watchdog to a hard abort.  Unpublish on the way out:
+       * the ring reached ctx->rings but never started, and teardown walks
+       * that list expecting every entry to own a running thread. */
       npt_log("create_ring: failed to start ring monitor for ring %"
               PRIu64, cmd->ring_id);
+      mtx_lock(&ctx->ring_mutex);
+      npt_ring_destroy(ring);
+      mtx_unlock(&ctx->ring_mutex);
       return false;
    }
 
