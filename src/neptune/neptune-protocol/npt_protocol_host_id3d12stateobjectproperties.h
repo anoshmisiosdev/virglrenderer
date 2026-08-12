@@ -452,7 +452,9 @@ npt_dispatch_ID3D12StateObjectProperties1_GetProgramIdentifier(struct npt_dispat
     if (ctx->id3d12stateobjectproperties1_dispatch_overrides && ctx->id3d12stateobjectproperties1_dispatch_overrides->GetProgramIdentifier) {
         args.ret = ctx->id3d12stateobjectproperties1_dispatch_overrides->GetProgramIdentifier(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self, args.pProgramName);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret, args.pProgramName);
     }
 
     /* Register any output COM handles in the context object table so

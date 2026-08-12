@@ -81,7 +81,9 @@ npt_dispatch_ID3D12DeviceConfiguration_GetDesc(struct npt_dispatch_context *ctx,
     if (ctx->id3d12deviceconfiguration_dispatch_overrides && ctx->id3d12deviceconfiguration_dispatch_overrides->GetDesc) {
         args.ret = ctx->id3d12deviceconfiguration_dispatch_overrides->GetDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
@@ -237,6 +239,7 @@ npt_decode_ID3D12DeviceConfiguration_SerializeVersionedRootSignature_args_temp(s
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -373,6 +376,7 @@ npt_decode_ID3D12DeviceConfiguration_CreateVersionedRootSignatureDeserializer_ar
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -511,6 +515,7 @@ npt_decode_ID3D12DeviceConfiguration1_CreateVersionedRootSignatureDeserializerFr
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;

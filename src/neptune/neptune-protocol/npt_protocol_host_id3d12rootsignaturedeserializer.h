@@ -82,7 +82,9 @@ npt_dispatch_ID3D12RootSignatureDeserializer_GetRootSignatureDesc(struct npt_dis
     if (ctx->id3d12rootsignaturedeserializer_dispatch_overrides && ctx->id3d12rootsignaturedeserializer_dispatch_overrides->GetRootSignatureDesc) {
         args.ret = ctx->id3d12rootsignaturedeserializer_dispatch_overrides->GetRootSignatureDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so

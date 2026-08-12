@@ -438,7 +438,9 @@ npt_dispatch_ID3D12WorkGraphProperties_GetNodeID(struct npt_dispatch_context *ct
     if (ctx->id3d12workgraphproperties_dispatch_overrides && ctx->id3d12workgraphproperties_dispatch_overrides->GetNodeID) {
         args.ret = ctx->id3d12workgraphproperties_dispatch_overrides->GetNodeID(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self, args.WorkGraphIndex, args.NodeIndex);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret, args.WorkGraphIndex, args.NodeIndex);
     }
 
     /* Register any output COM handles in the context object table so
@@ -793,7 +795,9 @@ npt_dispatch_ID3D12WorkGraphProperties_GetEntrypointID(struct npt_dispatch_conte
     if (ctx->id3d12workgraphproperties_dispatch_overrides && ctx->id3d12workgraphproperties_dispatch_overrides->GetEntrypointID) {
         args.ret = ctx->id3d12workgraphproperties_dispatch_overrides->GetEntrypointID(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self, args.WorkGraphIndex, args.EntrypointIndex);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret, args.WorkGraphIndex, args.EntrypointIndex);
     }
 
     /* Register any output COM handles in the context object table so

@@ -277,7 +277,9 @@ npt_dispatch_ID3D12Resource_GetDesc(struct npt_dispatch_context *ctx,
     if (ctx->id3d12resource_dispatch_overrides && ctx->id3d12resource_dispatch_overrides->GetDesc) {
         args.ret = ctx->id3d12resource_dispatch_overrides->GetDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
@@ -517,9 +519,9 @@ npt_decode_ID3D12Resource_ReadFromSubresource_args_temp(struct npt_cs_decoder *d
         args->pSrcBox = NULL;
     }
     /* Allocate temp storage for output-only parameters */
-    args->pDstData = npt_cs_decoder_alloc_temp(dec, sizeof(void));
+    args->pDstData = npt_cs_decoder_alloc_temp(dec, 1);
     if (!args->pDstData) return;
-    memset(args->pDstData, 0, sizeof(void));
+    memset(args->pDstData, 0, 1);
 
 
 
@@ -719,6 +721,7 @@ npt_decode_ID3D12Resource1_GetProtectedResourceSession_args_temp(struct npt_cs_d
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -867,7 +870,9 @@ npt_dispatch_ID3D12Resource2_GetDesc1(struct npt_dispatch_context *ctx,
     if (ctx->id3d12resource2_dispatch_overrides && ctx->id3d12resource2_dispatch_overrides->GetDesc1) {
         args.ret = ctx->id3d12resource2_dispatch_overrides->GetDesc1(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so

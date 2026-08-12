@@ -131,6 +131,7 @@ npt_decode_IDXGIDecodeSwapChain_SetSourceRect_args_temp(struct npt_cs_decoder *d
     } else {
         args->pRect = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -224,6 +225,7 @@ npt_decode_IDXGIDecodeSwapChain_SetTargetRect_args_temp(struct npt_cs_decoder *d
     } else {
         args->pRect = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 

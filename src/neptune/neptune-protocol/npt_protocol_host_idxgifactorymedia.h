@@ -58,6 +58,7 @@ npt_decode_IDXGIFactoryMedia_CreateSwapChainForCompositionSurfaceHandle_args_tem
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;
@@ -194,6 +195,7 @@ npt_decode_IDXGIFactoryMedia_CreateDecodeSwapChainForCompositionSurfaceHandle_ar
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;

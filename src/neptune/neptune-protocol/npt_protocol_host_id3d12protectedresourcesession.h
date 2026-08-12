@@ -81,7 +81,9 @@ npt_dispatch_ID3D12ProtectedResourceSession_GetDesc(struct npt_dispatch_context 
     if (ctx->id3d12protectedresourcesession_dispatch_overrides && ctx->id3d12protectedresourcesession_dispatch_overrides->GetDesc) {
         args.ret = ctx->id3d12protectedresourcesession_dispatch_overrides->GetDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
@@ -165,7 +167,9 @@ npt_dispatch_ID3D12ProtectedResourceSession1_GetDesc1(struct npt_dispatch_contex
     if (ctx->id3d12protectedresourcesession1_dispatch_overrides && ctx->id3d12protectedresourcesession1_dispatch_overrides->GetDesc1) {
         args.ret = ctx->id3d12protectedresourcesession1_dispatch_overrides->GetDesc1(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so

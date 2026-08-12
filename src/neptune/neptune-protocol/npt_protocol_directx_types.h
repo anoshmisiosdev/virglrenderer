@@ -18,31 +18,12 @@
 #  endif
 #endif
 
-#if defined(_WIN32) && !defined(__MINGW32__)
-
-#include <dxgiformat.h>
-#include <dxgicommon.h>
-#include <dxgitype.h>
-#include <dxgi.h>
-#include <dxgi1_2.h>
-#include <dxgi1_3.h>
-#include <dxgi1_4.h>
-#include <dxgi1_5.h>
-#include <dxgi1_6.h>
-#include <d3dcommon.h>
-#include <d3d11.h>
-#include <d3d11_1.h>
-#include <d3d11_2.h>
-#include <d3d11_3.h>
-#include <d3d11_4.h>
-#include <d3d11on12.h>
-#include <d3d12.h>
-
-#elif defined(__MINGW32__)
+#if defined(_WIN32)
 
 /* Pull in basic Win32 types (HRESULT, GUID, LONG, ...) from windows.h
- * but rely on this protocol header for the D3D-specific types that
- * MinGW's d3d11.h / d3d12.h are missing.  unknwn.h provides IUnknown. */
+ * but rely on this protocol header for the D3D-specific types so the
+ * overlay-driven tagged-union representation stays self-consistent.
+ * unknwn.h provides IUnknown. */
 #ifndef WIN32_LEAN_AND_MEAN
 #  define WIN32_LEAN_AND_MEAN
 #endif
@@ -125,8 +106,6 @@ typedef struct IUnknown {
 } IUnknown;
 
 #endif /* native Linux */
-
-#if !defined(_WIN32) || defined(__MINGW32__)
 
 /* Interface forward declarations */
 typedef struct IDXGIObject IDXGIObject;
@@ -508,7 +487,7 @@ typedef struct DXGI_JPEG_AC_HUFFMAN_TABLE DXGI_JPEG_AC_HUFFMAN_TABLE;
 typedef struct DXGI_JPEG_QUANTIZATION_TABLE DXGI_JPEG_QUANTIZATION_TABLE;
 typedef struct DXGI_FRAME_STATISTICS DXGI_FRAME_STATISTICS;
 typedef struct DXGI_MAPPED_RECT DXGI_MAPPED_RECT;
-#ifndef __MINGW32__
+#ifndef _WIN32
 typedef struct LUID LUID;
 #endif
 typedef struct DXGI_ADAPTER_DESC DXGI_ADAPTER_DESC;
@@ -797,12 +776,12 @@ typedef struct D3D12_SUBRESOURCE_DATA D3D12_SUBRESOURCE_DATA;
 typedef struct D3D12_MEMCPY_DEST D3D12_MEMCPY_DEST;
 typedef struct D3D12_DEVICE_CONFIGURATION_DESC D3D12_DEVICE_CONFIGURATION_DESC;
 typedef struct D3D12_DISPATCH_MESH_ARGUMENTS D3D12_DISPATCH_MESH_ARGUMENTS;
-#ifndef __MINGW32__
+#ifndef _WIN32
 typedef struct SIZE SIZE;
 #endif
 
 /* Placeholder types (referenced but not in protocol JSON) */
-#ifndef __MINGW32__
+#ifndef _WIN32
 typedef int HDC; /* placeholder */
 #endif
 typedef int PFN_DESTRUCTION_CALLBACK; /* placeholder */
@@ -4855,7 +4834,7 @@ typedef enum D3D12_SHADING_RATE_COMBINER {
 
 /* Type aliases */
 typedef D3DCOLORVALUE DXGI_RGBA;
-#ifndef __MINGW32__
+#ifndef _WIN32
 typedef uint32_t UINT;
 #endif
 typedef UINT DXGI_USAGE;
@@ -4863,11 +4842,11 @@ typedef D3D_PRIMITIVE_TOPOLOGY D3D11_PRIMITIVE_TOPOLOGY;
 typedef D3D_PRIMITIVE D3D11_PRIMITIVE;
 typedef D3D_SRV_DIMENSION D3D11_SRV_DIMENSION;
 typedef RECT D3D11_RECT;
-#ifndef __MINGW32__
+#ifndef _WIN32
 typedef int32_t HRESULT;
 #endif
 typedef HRESULT APP_DEPRECATED_HRESULT;
-#ifndef __MINGW32__
+#ifndef _WIN32
 typedef uint64_t UINT64;
 #endif
 typedef UINT64 D3D12_GPU_VIRTUAL_ADDRESS;
@@ -6110,7 +6089,7 @@ struct DXGI_MAPPED_RECT {
     BYTE *pBits;
 };
 
-#ifndef __MINGW32__
+#ifndef _WIN32
 struct LUID {
     DWORD LowPart;
     LONG HighPart;
@@ -8360,7 +8339,7 @@ struct D3D12_DISPATCH_MESH_ARGUMENTS {
     UINT ThreadGroupCountZ;
 };
 
-#ifndef __MINGW32__
+#ifndef _WIN32
 struct SIZE {
     LONG cx;
     LONG cy;
@@ -8717,19 +8696,17 @@ typedef union {
 
 
 /* Top-level function declarations */
-HRESULT CreateDXGIFactory(const IID *riid, void **ppFactory);
-HRESULT CreateDXGIFactory1(const IID *riid, void **ppFactory);
-HRESULT CreateDXGIFactory2(UINT Flags, const IID *riid, void **ppFactory);
-HRESULT DXGIDeclareAdapterRemovalSupport(void);
-HRESULT D3D11CreateDevice(IDXGIAdapter *pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags, const D3D_FEATURE_LEVEL *pFeatureLevels, UINT FeatureLevels, UINT SDKVersion, ID3D11Device **ppDevice, D3D_FEATURE_LEVEL *pFeatureLevel, ID3D11DeviceContext **ppImmediateContext);
-HRESULT D3D11CreateDeviceAndSwapChain(IDXGIAdapter *pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags, const D3D_FEATURE_LEVEL *pFeatureLevels, UINT FeatureLevels, UINT SDKVersion, const DXGI_SWAP_CHAIN_DESC *pSwapChainDesc, IDXGISwapChain **ppSwapChain, ID3D11Device **ppDevice, D3D_FEATURE_LEVEL *pFeatureLevel, ID3D11DeviceContext **ppImmediateContext);
-HRESULT D3D11On12CreateDevice(IUnknown *pDevice, UINT Flags, const D3D_FEATURE_LEVEL *pFeatureLevels, UINT FeatureLevels, const IUnknown **ppCommandQueues, UINT NumQueues, UINT NodeMask, ID3D11Device **ppDevice, ID3D11DeviceContext **ppImmediateContext, D3D_FEATURE_LEVEL *pChosenFeatureLevel);
-HRESULT D3D12CreateDevice(IUnknown *pAdapter, D3D_FEATURE_LEVEL MinimumFeatureLevel, const IID *riid, void **ppDevice);
-HRESULT D3D12CreateRootSignatureDeserializer(const VOID *pSrcData, SIZE_T SrcDataSizeInBytes, const IID *pRootSignatureDeserializerInterface, void **ppRootSignatureDeserializer);
-HRESULT D3D12CreateVersionedRootSignatureDeserializer(const VOID *pSrcData, SIZE_T SrcDataSizeInBytes, const IID *pRootSignatureDeserializerInterface, void **ppRootSignatureDeserializer);
-HRESULT D3D12SerializeRootSignature(const D3D12_ROOT_SIGNATURE_DESC *pRootSignature, D3D_ROOT_SIGNATURE_VERSION Version, ID3DBlob **ppBlob, ID3DBlob **ppErrorBlob);
-HRESULT D3D12SerializeVersionedRootSignature(const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *pRootSignature, ID3DBlob **ppBlob, ID3DBlob **ppErrorBlob);
-
-#endif /* !_WIN32 || __MINGW32__ */
+HRESULT NPT_STDMETHODCALLTYPE CreateDXGIFactory(const IID *riid, void **ppFactory);
+HRESULT NPT_STDMETHODCALLTYPE CreateDXGIFactory1(const IID *riid, void **ppFactory);
+HRESULT NPT_STDMETHODCALLTYPE CreateDXGIFactory2(UINT Flags, const IID *riid, void **ppFactory);
+HRESULT NPT_STDMETHODCALLTYPE DXGIDeclareAdapterRemovalSupport(void);
+HRESULT NPT_STDMETHODCALLTYPE D3D11CreateDevice(IDXGIAdapter *pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags, const D3D_FEATURE_LEVEL *pFeatureLevels, UINT FeatureLevels, UINT SDKVersion, ID3D11Device **ppDevice, D3D_FEATURE_LEVEL *pFeatureLevel, ID3D11DeviceContext **ppImmediateContext);
+HRESULT NPT_STDMETHODCALLTYPE D3D11CreateDeviceAndSwapChain(IDXGIAdapter *pAdapter, D3D_DRIVER_TYPE DriverType, HMODULE Software, UINT Flags, const D3D_FEATURE_LEVEL *pFeatureLevels, UINT FeatureLevels, UINT SDKVersion, const DXGI_SWAP_CHAIN_DESC *pSwapChainDesc, IDXGISwapChain **ppSwapChain, ID3D11Device **ppDevice, D3D_FEATURE_LEVEL *pFeatureLevel, ID3D11DeviceContext **ppImmediateContext);
+HRESULT NPT_STDMETHODCALLTYPE D3D11On12CreateDevice(IUnknown *pDevice, UINT Flags, const D3D_FEATURE_LEVEL *pFeatureLevels, UINT FeatureLevels, const IUnknown **ppCommandQueues, UINT NumQueues, UINT NodeMask, ID3D11Device **ppDevice, ID3D11DeviceContext **ppImmediateContext, D3D_FEATURE_LEVEL *pChosenFeatureLevel);
+HRESULT NPT_STDMETHODCALLTYPE D3D12CreateDevice(IUnknown *pAdapter, D3D_FEATURE_LEVEL MinimumFeatureLevel, const IID *riid, void **ppDevice);
+HRESULT NPT_STDMETHODCALLTYPE D3D12CreateRootSignatureDeserializer(const VOID *pSrcData, SIZE_T SrcDataSizeInBytes, const IID *pRootSignatureDeserializerInterface, void **ppRootSignatureDeserializer);
+HRESULT NPT_STDMETHODCALLTYPE D3D12CreateVersionedRootSignatureDeserializer(const VOID *pSrcData, SIZE_T SrcDataSizeInBytes, const IID *pRootSignatureDeserializerInterface, void **ppRootSignatureDeserializer);
+HRESULT NPT_STDMETHODCALLTYPE D3D12SerializeRootSignature(const D3D12_ROOT_SIGNATURE_DESC *pRootSignature, D3D_ROOT_SIGNATURE_VERSION Version, UINT *pBlobSize, void *pBlobData, UINT *pErrorBlobSize, void *pErrorBlobData);
+HRESULT NPT_STDMETHODCALLTYPE D3D12SerializeVersionedRootSignature(const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *pRootSignature, UINT *pBlobSize, void *pBlobData, UINT *pErrorBlobSize, void *pErrorBlobData);
 
 #endif /* NPT_PROTOCOL_DIRECTX_H */

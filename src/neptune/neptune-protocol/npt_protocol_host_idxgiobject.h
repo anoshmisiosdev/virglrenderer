@@ -41,6 +41,7 @@ npt_decode_IDXGIObject_SetPrivateData_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->Name = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_UINT(dec, &args->DataSize);
     {
@@ -148,6 +149,7 @@ npt_decode_IDXGIObject_SetPrivateDataInterface_args_temp(struct npt_cs_decoder *
     } else {
         args->Name = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;
@@ -250,6 +252,7 @@ npt_decode_IDXGIObject_GetPrivateData_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->Name = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pDataSize = npt_cs_decoder_alloc_temp(dec, sizeof(UINT));
@@ -258,6 +261,7 @@ npt_decode_IDXGIObject_GetPrivateData_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pDataSize = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */
@@ -374,6 +378,7 @@ npt_decode_IDXGIObject_GetParent_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;

@@ -136,6 +136,7 @@ npt_decode_IDXGISwapChain_GetBuffer_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -635,6 +636,7 @@ npt_decode_IDXGISwapChain_ResizeTarget_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pNewTargetParameters = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -1284,6 +1286,7 @@ npt_decode_IDXGISwapChain1_GetCoreWindow_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->refiid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -1394,6 +1397,7 @@ npt_decode_IDXGISwapChain1_Present1_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pPresentParameters = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -1673,6 +1677,7 @@ npt_decode_IDXGISwapChain1_SetBackgroundColor_args_temp(struct npt_cs_decoder *d
     } else {
         args->pColor = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -2478,6 +2483,7 @@ npt_decode_IDXGISwapChain2_SetMatrixTransform_args_temp(struct npt_cs_decoder *d
     } else {
         args->pMatrix = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -2927,29 +2933,36 @@ npt_decode_IDXGISwapChain3_ResizeBuffers1_args_temp(struct npt_cs_decoder *dec,
     npt_decode_UINT(dec, &args->Height);
     npt_decode_DXGI_FORMAT(dec, &args->Format);
     npt_decode_UINT(dec, &args->SwapChainFlags);
+    uint64_t _cnt_pCreationNodeMask = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pCreationNodeMask = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _count);
+        _cnt_pCreationNodeMask = npt_decode_array_count_unchecked(dec);
+        args->pCreationNodeMask = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _cnt_pCreationNodeMask);
         if (!args->pCreationNodeMask) return;
-        npt_decode_UINT_array(dec, (UINT *)args->pCreationNodeMask, _count);
+        npt_decode_UINT_array(dec, (UINT *)args->pCreationNodeMask, _cnt_pCreationNodeMask);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->BufferCount); /* unused: count_expr from registry */
         args->pCreationNodeMask = NULL;
     }
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppPresentQueue = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppPresentQueue) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppPresentQueue[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppPresentQueue = NULL;
+    uint64_t _cnt_ppPresentQueue = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppPresentQueue) {
+        args->ppPresentQueue = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppPresentQueue);
+        if (!args->ppPresentQueue) return;
+        for (uint64_t _i = 0; _i < _cnt_ppPresentQueue; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppPresentQueue[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppPresentQueue = NULL;
+    }
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pCreationNodeMask && _cnt_pCreationNodeMask < (uint64_t)(args->BufferCount)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_ppPresentQueue && _cnt_ppPresentQueue < (uint64_t)(args->BufferCount)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 

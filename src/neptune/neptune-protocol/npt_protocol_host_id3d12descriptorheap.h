@@ -81,7 +81,9 @@ npt_dispatch_ID3D12DescriptorHeap_GetDesc(struct npt_dispatch_context *ctx,
     if (ctx->id3d12descriptorheap_dispatch_overrides && ctx->id3d12descriptorheap_dispatch_overrides->GetDesc) {
         args.ret = ctx->id3d12descriptorheap_dispatch_overrides->GetDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
@@ -165,7 +167,9 @@ npt_dispatch_ID3D12DescriptorHeap_GetCPUDescriptorHandleForHeapStart(struct npt_
     if (ctx->id3d12descriptorheap_dispatch_overrides && ctx->id3d12descriptorheap_dispatch_overrides->GetCPUDescriptorHandleForHeapStart) {
         args.ret = ctx->id3d12descriptorheap_dispatch_overrides->GetCPUDescriptorHandleForHeapStart(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
@@ -249,7 +253,9 @@ npt_dispatch_ID3D12DescriptorHeap_GetGPUDescriptorHandleForHeapStart(struct npt_
     if (ctx->id3d12descriptorheap_dispatch_overrides && ctx->id3d12descriptorheap_dispatch_overrides->GetGPUDescriptorHandleForHeapStart) {
         args.ret = ctx->id3d12descriptorheap_dispatch_overrides->GetGPUDescriptorHandleForHeapStart(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so

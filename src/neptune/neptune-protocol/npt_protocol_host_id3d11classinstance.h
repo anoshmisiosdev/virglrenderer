@@ -229,6 +229,7 @@ npt_decode_ID3D11ClassInstance_GetInstanceName_args_temp(struct npt_cs_decoder *
     } else {
         args->pBufferLength = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
     if (*args->pBufferLength) {
@@ -338,6 +339,7 @@ npt_decode_ID3D11ClassInstance_GetTypeName_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pBufferLength = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
     if (*args->pBufferLength) {

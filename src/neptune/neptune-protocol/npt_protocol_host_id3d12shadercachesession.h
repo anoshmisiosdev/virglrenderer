@@ -54,6 +54,7 @@ npt_decode_ID3D12ShaderCacheSession_FindValue_args_temp(struct npt_cs_decoder *d
     } else {
         args->pValueSize = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -401,7 +402,9 @@ npt_dispatch_ID3D12ShaderCacheSession_GetDesc(struct npt_dispatch_context *ctx,
     if (ctx->id3d12shadercachesession_dispatch_overrides && ctx->id3d12shadercachesession_dispatch_overrides->GetDesc) {
         args.ret = ctx->id3d12shadercachesession_dispatch_overrides->GetDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so

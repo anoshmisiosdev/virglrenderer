@@ -156,6 +156,7 @@ npt_decode_ID3D12SDKConfiguration1_CreateDeviceFactory_args_temp(struct npt_cs_d
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;

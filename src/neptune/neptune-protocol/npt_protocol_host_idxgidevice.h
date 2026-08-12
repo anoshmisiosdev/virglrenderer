@@ -149,6 +149,7 @@ npt_decode_IDXGIDevice_CreateSurface_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_UINT(dec, &args->NumSurfaces);
     npt_decode_DXGI_USAGE(dec, &args->Usage);
@@ -272,22 +273,25 @@ npt_decode_IDXGIDevice_QueryResourceResidency_args_temp(struct npt_cs_decoder *d
                                                         struct npt_command_IDXGIDevice_QueryResourceResidency *args)
 {
     /* Decode input parameters from the wire */
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppResources) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppResources[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppResources = NULL;
+    uint64_t _cnt_ppResources = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppResources) {
+        args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppResources);
+        if (!args->ppResources) return;
+        for (uint64_t _i = 0; _i < _cnt_ppResources; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppResources[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppResources = NULL;
     }
 
     npt_decode_UINT(dec, &args->NumResources);
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppResources && _cnt_ppResources < (uint64_t)(args->NumResources)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
     if (args->NumResources) {
@@ -747,21 +751,24 @@ npt_decode_IDXGIDevice2_OfferResources_args_temp(struct npt_cs_decoder *dec,
 {
     /* Decode input parameters from the wire */
     npt_decode_UINT(dec, &args->NumResources);
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppResources) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppResources[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppResources = NULL;
+    uint64_t _cnt_ppResources = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppResources) {
+        args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppResources);
+        if (!args->ppResources) return;
+        for (uint64_t _i = 0; _i < _cnt_ppResources; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppResources[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppResources = NULL;
     }
     npt_decode_DXGI_OFFER_RESOURCE_PRIORITY(dec, &args->Priority);
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppResources && _cnt_ppResources < (uint64_t)(args->NumResources)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 
@@ -857,21 +864,24 @@ npt_decode_IDXGIDevice2_ReclaimResources_args_temp(struct npt_cs_decoder *dec,
 {
     /* Decode input parameters from the wire */
     npt_decode_UINT(dec, &args->NumResources);
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppResources) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppResources[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppResources = NULL;
+    uint64_t _cnt_ppResources = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppResources) {
+        args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppResources);
+        if (!args->ppResources) return;
+        for (uint64_t _i = 0; _i < _cnt_ppResources; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppResources[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppResources = NULL;
     }
 
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppResources && _cnt_ppResources < (uint64_t)(args->NumResources)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 
@@ -1153,22 +1163,25 @@ npt_decode_IDXGIDevice4_OfferResources1_args_temp(struct npt_cs_decoder *dec,
 {
     /* Decode input parameters from the wire */
     npt_decode_UINT(dec, &args->NumResources);
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppResources) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppResources[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppResources = NULL;
+    uint64_t _cnt_ppResources = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppResources) {
+        args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppResources);
+        if (!args->ppResources) return;
+        for (uint64_t _i = 0; _i < _cnt_ppResources; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppResources[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppResources = NULL;
     }
     npt_decode_DXGI_OFFER_RESOURCE_PRIORITY(dec, &args->Priority);
     npt_decode_UINT(dec, &args->Flags);
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppResources && _cnt_ppResources < (uint64_t)(args->NumResources)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 
@@ -1265,21 +1278,24 @@ npt_decode_IDXGIDevice4_ReclaimResources1_args_temp(struct npt_cs_decoder *dec,
 {
     /* Decode input parameters from the wire */
     npt_decode_UINT(dec, &args->NumResources);
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppResources) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppResources[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppResources = NULL;
+    uint64_t _cnt_ppResources = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppResources) {
+        args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppResources);
+        if (!args->ppResources) return;
+        for (uint64_t _i = 0; _i < _cnt_ppResources; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppResources[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppResources = NULL;
     }
 
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppResources && _cnt_ppResources < (uint64_t)(args->NumResources)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 

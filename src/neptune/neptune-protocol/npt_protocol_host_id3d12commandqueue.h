@@ -46,26 +46,26 @@ npt_decode_ID3D12CommandQueue_UpdateTileMappings_args_temp(struct npt_cs_decoder
         args->pResource = (ID3D12Resource *)npt_object_from_id(_id);
     }
     npt_decode_UINT(dec, &args->NumResourceRegions);
+    uint64_t _cnt_pResourceRegionStartCoordinates = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pResourceRegionStartCoordinates = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D12_TILED_RESOURCE_COORDINATE), _count);
+        _cnt_pResourceRegionStartCoordinates = npt_decode_array_count_unchecked(dec);
+        args->pResourceRegionStartCoordinates = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D12_TILED_RESOURCE_COORDINATE), _cnt_pResourceRegionStartCoordinates);
         if (!args->pResourceRegionStartCoordinates) return;
-        for (uint32_t _i = 0; _i < (uint32_t)_count; _i++)
+        for (uint32_t _i = 0; _i < (uint32_t)_cnt_pResourceRegionStartCoordinates; _i++)
             npt_decode_D3D12_TILED_RESOURCE_COORDINATE(dec, (D3D12_TILED_RESOURCE_COORDINATE *)&args->pResourceRegionStartCoordinates[_i]);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumResourceRegions); /* unused: count_expr from registry */
         args->pResourceRegionStartCoordinates = NULL;
     }
+    uint64_t _cnt_pResourceRegionSizes = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pResourceRegionSizes = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D12_TILE_REGION_SIZE), _count);
+        _cnt_pResourceRegionSizes = npt_decode_array_count_unchecked(dec);
+        args->pResourceRegionSizes = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D12_TILE_REGION_SIZE), _cnt_pResourceRegionSizes);
         if (!args->pResourceRegionSizes) return;
-        for (uint32_t _i = 0; _i < (uint32_t)_count; _i++)
+        for (uint32_t _i = 0; _i < (uint32_t)_cnt_pResourceRegionSizes; _i++)
             npt_decode_D3D12_TILE_REGION_SIZE(dec, (D3D12_TILE_REGION_SIZE *)&args->pResourceRegionSizes[_i]);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumResourceRegions); /* unused: count_expr from registry */
         args->pResourceRegionSizes = NULL;
     }
     {
@@ -74,37 +74,58 @@ npt_decode_ID3D12CommandQueue_UpdateTileMappings_args_temp(struct npt_cs_decoder
         args->pHeap = (ID3D12Heap *)npt_object_from_id(_id);
     }
     npt_decode_UINT(dec, &args->NumRanges);
+    uint64_t _cnt_pRangeFlags = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pRangeFlags = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D12_TILE_RANGE_FLAGS), _count);
+        _cnt_pRangeFlags = npt_decode_array_count_unchecked(dec);
+        args->pRangeFlags = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D12_TILE_RANGE_FLAGS), _cnt_pRangeFlags);
         if (!args->pRangeFlags) return;
-        npt_decode_D3D12_TILE_RANGE_FLAGS_array(dec, (D3D12_TILE_RANGE_FLAGS *)args->pRangeFlags, _count);
+        npt_decode_D3D12_TILE_RANGE_FLAGS_array(dec, (D3D12_TILE_RANGE_FLAGS *)args->pRangeFlags, _cnt_pRangeFlags);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumRanges); /* unused: count_expr from registry */
         args->pRangeFlags = NULL;
     }
+    uint64_t _cnt_pHeapRangeStartOffsets = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pHeapRangeStartOffsets = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _count);
+        _cnt_pHeapRangeStartOffsets = npt_decode_array_count_unchecked(dec);
+        args->pHeapRangeStartOffsets = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _cnt_pHeapRangeStartOffsets);
         if (!args->pHeapRangeStartOffsets) return;
-        npt_decode_UINT_array(dec, (UINT *)args->pHeapRangeStartOffsets, _count);
+        npt_decode_UINT_array(dec, (UINT *)args->pHeapRangeStartOffsets, _cnt_pHeapRangeStartOffsets);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumRanges); /* unused: count_expr from registry */
         args->pHeapRangeStartOffsets = NULL;
     }
+    uint64_t _cnt_pRangeTileCounts = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pRangeTileCounts = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _count);
+        _cnt_pRangeTileCounts = npt_decode_array_count_unchecked(dec);
+        args->pRangeTileCounts = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _cnt_pRangeTileCounts);
         if (!args->pRangeTileCounts) return;
-        npt_decode_UINT_array(dec, (UINT *)args->pRangeTileCounts, _count);
+        npt_decode_UINT_array(dec, (UINT *)args->pRangeTileCounts, _cnt_pRangeTileCounts);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumRanges); /* unused: count_expr from registry */
         args->pRangeTileCounts = NULL;
     }
     npt_decode_D3D12_TILE_MAPPING_FLAGS(dec, &args->Flags);
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pResourceRegionStartCoordinates && _cnt_pResourceRegionStartCoordinates < (uint64_t)(args->NumResourceRegions)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_pResourceRegionSizes && _cnt_pResourceRegionSizes < (uint64_t)(args->NumResourceRegions)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_pRangeFlags && _cnt_pRangeFlags < (uint64_t)(args->NumRanges)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_pHeapRangeStartOffsets && _cnt_pHeapRangeStartOffsets < (uint64_t)(args->NumRanges)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_pRangeTileCounts && _cnt_pRangeTileCounts < (uint64_t)(args->NumRanges)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 
@@ -217,6 +238,7 @@ npt_decode_ID3D12CommandQueue_CopyTileMappings_args_temp(struct npt_cs_decoder *
     } else {
         args->pDstRegionStartCoordinate = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;
@@ -230,6 +252,7 @@ npt_decode_ID3D12CommandQueue_CopyTileMappings_args_temp(struct npt_cs_decoder *
     } else {
         args->pSrcRegionStartCoordinate = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pRegionSize = npt_cs_decoder_alloc_temp(dec, sizeof(D3D12_TILE_REGION_SIZE));
@@ -238,6 +261,7 @@ npt_decode_ID3D12CommandQueue_CopyTileMappings_args_temp(struct npt_cs_decoder *
     } else {
         args->pRegionSize = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_D3D12_TILE_MAPPING_FLAGS(dec, &args->Flags);
     /* Allocate temp storage for output-only parameters */
@@ -333,19 +357,22 @@ npt_decode_ID3D12CommandQueue_ExecuteCommandLists_args_temp(struct npt_cs_decode
 {
     /* Decode input parameters from the wire */
     npt_decode_UINT(dec, &args->NumCommandLists);
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppCommandLists = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppCommandLists) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppCommandLists[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppCommandLists = NULL;
+    uint64_t _cnt_ppCommandLists = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppCommandLists) {
+        args->ppCommandLists = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppCommandLists);
+        if (!args->ppCommandLists) return;
+        for (uint64_t _i = 0; _i < _cnt_ppCommandLists; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppCommandLists[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppCommandLists = NULL;
+    }
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppCommandLists && _cnt_ppCommandLists < (uint64_t)(args->NumCommandLists)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -1144,7 +1171,9 @@ npt_dispatch_ID3D12CommandQueue_GetDesc(struct npt_dispatch_context *ctx,
     if (ctx->id3d12commandqueue_dispatch_overrides && ctx->id3d12commandqueue_dispatch_overrides->GetDesc) {
         args.ret = ctx->id3d12commandqueue_dispatch_overrides->GetDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so

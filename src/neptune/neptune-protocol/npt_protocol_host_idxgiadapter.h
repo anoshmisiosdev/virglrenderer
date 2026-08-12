@@ -234,6 +234,7 @@ npt_decode_IDXGIAdapter_CheckInterfaceSupport_args_temp(struct npt_cs_decoder *d
     } else {
         args->InterfaceName = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */

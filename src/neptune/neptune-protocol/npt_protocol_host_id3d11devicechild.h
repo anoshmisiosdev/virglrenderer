@@ -141,6 +141,7 @@ npt_decode_ID3D11DeviceChild_GetPrivateData_args_temp(struct npt_cs_decoder *dec
     } else {
         args->guid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pDataSize = npt_cs_decoder_alloc_temp(dec, sizeof(UINT));
@@ -149,6 +150,7 @@ npt_decode_ID3D11DeviceChild_GetPrivateData_args_temp(struct npt_cs_decoder *dec
     } else {
         args->pDataSize = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */
@@ -261,6 +263,7 @@ npt_decode_ID3D11DeviceChild_SetPrivateData_args_temp(struct npt_cs_decoder *dec
     } else {
         args->guid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_UINT(dec, &args->DataSize);
     {
@@ -368,6 +371,7 @@ npt_decode_ID3D11DeviceChild_SetPrivateDataInterface_args_temp(struct npt_cs_dec
     } else {
         args->guid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;

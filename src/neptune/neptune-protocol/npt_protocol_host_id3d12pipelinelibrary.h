@@ -160,6 +160,7 @@ npt_decode_ID3D12PipelineLibrary_LoadGraphicsPipeline_args_temp(struct npt_cs_de
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->riid = npt_cs_decoder_alloc_temp(dec, sizeof(IID));
@@ -168,6 +169,7 @@ npt_decode_ID3D12PipelineLibrary_LoadGraphicsPipeline_args_temp(struct npt_cs_de
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -296,6 +298,7 @@ npt_decode_ID3D12PipelineLibrary_LoadComputePipeline_args_temp(struct npt_cs_dec
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->riid = npt_cs_decoder_alloc_temp(dec, sizeof(IID));
@@ -304,6 +307,7 @@ npt_decode_ID3D12PipelineLibrary_LoadComputePipeline_args_temp(struct npt_cs_dec
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -617,6 +621,7 @@ npt_decode_ID3D12PipelineLibrary1_LoadPipeline_args_temp(struct npt_cs_decoder *
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->riid = npt_cs_decoder_alloc_temp(dec, sizeof(IID));
@@ -625,6 +630,7 @@ npt_decode_ID3D12PipelineLibrary1_LoadPipeline_args_temp(struct npt_cs_decoder *
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;

@@ -81,7 +81,9 @@ npt_dispatch_ID3D12SwapChainAssistant_GetLUID(struct npt_dispatch_context *ctx,
     if (ctx->id3d12swapchainassistant_dispatch_overrides && ctx->id3d12swapchainassistant_dispatch_overrides->GetLUID) {
         args.ret = ctx->id3d12swapchainassistant_dispatch_overrides->GetLUID(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
@@ -129,6 +131,7 @@ npt_decode_ID3D12SwapChainAssistant_GetSwapChainObject_args_temp(struct npt_cs_d
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -248,6 +251,7 @@ npt_decode_ID3D12SwapChainAssistant_GetCurrentResourceAndCommandQueue_args_temp(
     } else {
         args->riidResource = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -264,6 +268,7 @@ npt_decode_ID3D12SwapChainAssistant_GetCurrentResourceAndCommandQueue_args_temp(
     } else {
         args->riidQueue = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;

@@ -46,6 +46,7 @@ npt_decode_ID3D11VideoDevice_CreateVideoDecoder_args_temp(struct npt_cs_decoder 
     } else {
         args->pVideoDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pConfig = npt_cs_decoder_alloc_temp(dec, sizeof(D3D11_VIDEO_DECODER_CONFIG));
@@ -54,6 +55,7 @@ npt_decode_ID3D11VideoDevice_CreateVideoDecoder_args_temp(struct npt_cs_decoder 
     } else {
         args->pConfig = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -384,6 +386,7 @@ npt_decode_ID3D11VideoDevice_CreateCryptoSession_args_temp(struct npt_cs_decoder
     } else {
         args->pCryptoType = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pDecoderProfile = npt_cs_decoder_alloc_temp(dec, sizeof(GUID));
@@ -399,6 +402,7 @@ npt_decode_ID3D11VideoDevice_CreateCryptoSession_args_temp(struct npt_cs_decoder
     } else {
         args->pKeyExchangeType = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -518,6 +522,7 @@ npt_decode_ID3D11VideoDevice_CreateVideoDecoderOutputView_args_temp(struct npt_c
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -643,6 +648,7 @@ npt_decode_ID3D11VideoDevice_CreateVideoProcessorInputView_args_temp(struct npt_
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -770,6 +776,7 @@ npt_decode_ID3D11VideoDevice_CreateVideoProcessorOutputView_args_temp(struct npt
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -885,6 +892,7 @@ npt_decode_ID3D11VideoDevice_CreateVideoProcessorEnumerator_args_temp(struct npt
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -1168,6 +1176,7 @@ npt_decode_ID3D11VideoDevice_CheckVideoDecoderFormat_args_temp(struct npt_cs_dec
     } else {
         args->pDecoderProfile = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_DXGI_FORMAT(dec, &args->Format);
 
@@ -1270,6 +1279,7 @@ npt_decode_ID3D11VideoDevice_GetVideoDecoderConfigCount_args_temp(struct npt_cs_
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */
@@ -1371,6 +1381,7 @@ npt_decode_ID3D11VideoDevice_GetVideoDecoderConfig_args_temp(struct npt_cs_decod
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_UINT(dec, &args->Index);
 
@@ -1583,6 +1594,7 @@ npt_decode_ID3D11VideoDevice_CheckCryptoKeyExchange_args_temp(struct npt_cs_deco
     } else {
         args->pCryptoType = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pDecoderProfile = npt_cs_decoder_alloc_temp(dec, sizeof(GUID));
@@ -1694,6 +1706,7 @@ npt_decode_ID3D11VideoDevice_SetPrivateData_args_temp(struct npt_cs_decoder *dec
     } else {
         args->guid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_UINT(dec, &args->DataSize);
     {
@@ -1801,6 +1814,7 @@ npt_decode_ID3D11VideoDevice_SetPrivateDataInterface_args_temp(struct npt_cs_dec
     } else {
         args->guid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;
@@ -1905,6 +1919,7 @@ npt_decode_ID3D11VideoDevice1_GetCryptoSessionPrivateDataSize_args_temp(struct n
     } else {
         args->pCryptoType = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pDecoderProfile = npt_cs_decoder_alloc_temp(dec, sizeof(GUID));
@@ -1920,6 +1935,7 @@ npt_decode_ID3D11VideoDevice1_GetCryptoSessionPrivateDataSize_args_temp(struct n
     } else {
         args->pKeyExchangeType = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
 
@@ -2033,6 +2049,7 @@ npt_decode_ID3D11VideoDevice1_GetVideoDecoderCaps_args_temp(struct npt_cs_decode
     } else {
         args->pDecoderProfile = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_UINT(dec, &args->SampleWidth);
     npt_decode_UINT(dec, &args->SampleHeight);
@@ -2043,6 +2060,7 @@ npt_decode_ID3D11VideoDevice1_GetVideoDecoderCaps_args_temp(struct npt_cs_decode
     } else {
         args->pFrameRate = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_UINT(dec, &args->BitRate);
     if (npt_decode_simple_pointer(dec)) {
@@ -2161,6 +2179,7 @@ npt_decode_ID3D11VideoDevice1_CheckVideoDecoderDownsampling_args_temp(struct npt
     } else {
         args->pInputDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_DXGI_COLOR_SPACE_TYPE(dec, &args->InputColorSpace);
     if (npt_decode_simple_pointer(dec)) {
@@ -2170,6 +2189,7 @@ npt_decode_ID3D11VideoDevice1_CheckVideoDecoderDownsampling_args_temp(struct npt
     } else {
         args->pInputConfig = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pFrameRate = npt_cs_decoder_alloc_temp(dec, sizeof(DXGI_RATIONAL));
@@ -2178,6 +2198,7 @@ npt_decode_ID3D11VideoDevice1_CheckVideoDecoderDownsampling_args_temp(struct npt
     } else {
         args->pFrameRate = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pOutputDesc = npt_cs_decoder_alloc_temp(dec, sizeof(D3D11_VIDEO_SAMPLE_DESC));
@@ -2186,6 +2207,7 @@ npt_decode_ID3D11VideoDevice1_CheckVideoDecoderDownsampling_args_temp(struct npt
     } else {
         args->pOutputDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
 
@@ -2299,6 +2321,7 @@ npt_decode_ID3D11VideoDevice1_RecommendVideoDecoderDownsampleParameters_args_tem
     } else {
         args->pInputDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_DXGI_COLOR_SPACE_TYPE(dec, &args->InputColorSpace);
     if (npt_decode_simple_pointer(dec)) {
@@ -2308,6 +2331,7 @@ npt_decode_ID3D11VideoDevice1_RecommendVideoDecoderDownsampleParameters_args_tem
     } else {
         args->pInputConfig = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pFrameRate = npt_cs_decoder_alloc_temp(dec, sizeof(DXGI_RATIONAL));
@@ -2316,6 +2340,7 @@ npt_decode_ID3D11VideoDevice1_RecommendVideoDecoderDownsampleParameters_args_tem
     } else {
         args->pFrameRate = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */

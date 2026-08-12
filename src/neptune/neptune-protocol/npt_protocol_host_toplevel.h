@@ -41,6 +41,7 @@ npt_decode_CreateDXGIFactory_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -136,6 +137,7 @@ npt_decode_CreateDXGIFactory1_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -233,6 +235,7 @@ npt_decode_CreateDXGIFactory2_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -413,14 +416,14 @@ npt_decode_D3D11CreateDevice_args_temp(struct npt_cs_decoder *dec,
         args->Software = (HMODULE)(uintptr_t)npt_win32_handle_from_id(_id);
     }
     npt_decode_UINT(dec, &args->Flags);
+    uint64_t _cnt_pFeatureLevels = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pFeatureLevels = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D_FEATURE_LEVEL), _count);
+        _cnt_pFeatureLevels = npt_decode_array_count_unchecked(dec);
+        args->pFeatureLevels = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D_FEATURE_LEVEL), _cnt_pFeatureLevels);
         if (!args->pFeatureLevels) return;
-        npt_decode_D3D_FEATURE_LEVEL_array(dec, (D3D_FEATURE_LEVEL *)args->pFeatureLevels, _count);
+        npt_decode_D3D_FEATURE_LEVEL_array(dec, (D3D_FEATURE_LEVEL *)args->pFeatureLevels, _cnt_pFeatureLevels);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->FeatureLevels); /* unused: count_expr from registry */
         args->pFeatureLevels = NULL;
     }
     npt_decode_UINT(dec, &args->FeatureLevels);
@@ -441,6 +444,11 @@ npt_decode_D3D11CreateDevice_args_temp(struct npt_cs_decoder *dec,
         args->ppImmediateContext = npt_cs_decoder_alloc_temp(dec, sizeof(void *));
         if (!args->ppImmediateContext) return;
         *args->ppImmediateContext = NULL;
+    }
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pFeatureLevels && _cnt_pFeatureLevels < (uint64_t)(args->FeatureLevels)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -563,14 +571,14 @@ npt_decode_D3D11CreateDeviceAndSwapChain_args_temp(struct npt_cs_decoder *dec,
         args->Software = (HMODULE)(uintptr_t)npt_win32_handle_from_id(_id);
     }
     npt_decode_UINT(dec, &args->Flags);
+    uint64_t _cnt_pFeatureLevels = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pFeatureLevels = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D_FEATURE_LEVEL), _count);
+        _cnt_pFeatureLevels = npt_decode_array_count_unchecked(dec);
+        args->pFeatureLevels = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D_FEATURE_LEVEL), _cnt_pFeatureLevels);
         if (!args->pFeatureLevels) return;
-        npt_decode_D3D_FEATURE_LEVEL_array(dec, (D3D_FEATURE_LEVEL *)args->pFeatureLevels, _count);
+        npt_decode_D3D_FEATURE_LEVEL_array(dec, (D3D_FEATURE_LEVEL *)args->pFeatureLevels, _cnt_pFeatureLevels);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->FeatureLevels); /* unused: count_expr from registry */
         args->pFeatureLevels = NULL;
     }
     npt_decode_UINT(dec, &args->FeatureLevels);
@@ -606,6 +614,11 @@ npt_decode_D3D11CreateDeviceAndSwapChain_args_temp(struct npt_cs_decoder *dec,
         args->ppImmediateContext = npt_cs_decoder_alloc_temp(dec, sizeof(void *));
         if (!args->ppImmediateContext) return;
         *args->ppImmediateContext = NULL;
+    }
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pFeatureLevels && _cnt_pFeatureLevels < (uint64_t)(args->FeatureLevels)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -725,30 +738,28 @@ npt_decode_D3D11On12CreateDevice_args_temp(struct npt_cs_decoder *dec,
         args->pDevice = (IUnknown *)npt_object_from_id(_id);
     }
     npt_decode_UINT(dec, &args->Flags);
+    uint64_t _cnt_pFeatureLevels = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pFeatureLevels = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D_FEATURE_LEVEL), _count);
+        _cnt_pFeatureLevels = npt_decode_array_count_unchecked(dec);
+        args->pFeatureLevels = npt_cs_decoder_alloc_temp_array(dec, sizeof(D3D_FEATURE_LEVEL), _cnt_pFeatureLevels);
         if (!args->pFeatureLevels) return;
-        npt_decode_D3D_FEATURE_LEVEL_array(dec, (D3D_FEATURE_LEVEL *)args->pFeatureLevels, _count);
+        npt_decode_D3D_FEATURE_LEVEL_array(dec, (D3D_FEATURE_LEVEL *)args->pFeatureLevels, _cnt_pFeatureLevels);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->FeatureLevels); /* unused: count_expr from registry */
         args->pFeatureLevels = NULL;
     }
     npt_decode_UINT(dec, &args->FeatureLevels);
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppCommandQueues = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppCommandQueues) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppCommandQueues[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppCommandQueues = NULL;
+    uint64_t _cnt_ppCommandQueues = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppCommandQueues) {
+        args->ppCommandQueues = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppCommandQueues);
+        if (!args->ppCommandQueues) return;
+        for (uint64_t _i = 0; _i < _cnt_ppCommandQueues; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppCommandQueues[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppCommandQueues = NULL;
     }
     npt_decode_UINT(dec, &args->NumQueues);
     npt_decode_UINT(dec, &args->NodeMask);
@@ -769,6 +780,15 @@ npt_decode_D3D11On12CreateDevice_args_temp(struct npt_cs_decoder *dec,
         *args->ppImmediateContext = NULL;
     }
 
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pFeatureLevels && _cnt_pFeatureLevels < (uint64_t)(args->FeatureLevels)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_ppCommandQueues && _cnt_ppCommandQueues < (uint64_t)(args->NumQueues)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 
@@ -883,6 +903,7 @@ npt_decode_D3D12CreateDevice_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -992,6 +1013,7 @@ npt_decode_D3D12CreateRootSignatureDeserializer_args_temp(struct npt_cs_decoder 
     } else {
         args->pRootSignatureDeserializerInterface = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */
@@ -1093,6 +1115,7 @@ npt_decode_D3D12CreateVersionedRootSignatureDeserializer_args_temp(struct npt_cs
     } else {
         args->pRootSignatureDeserializerInterface = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */
@@ -1166,12 +1189,10 @@ npt_dispatch_D3D12CreateVersionedRootSignatureDeserializer(struct npt_dispatch_c
 struct npt_command_D3D12SerializeRootSignature {
     const D3D12_ROOT_SIGNATURE_DESC * pRootSignature;
     D3D_ROOT_SIGNATURE_VERSION Version;
-    ID3DBlob ** ppBlob;
-    ID3DBlob ** ppErrorBlob;
-    /* Shadow: guest-allocated id for ppBlob. */
-    uint64_t _guest_id_ppBlob;
-    /* Shadow: guest-allocated id for ppErrorBlob. */
-    uint64_t _guest_id_ppErrorBlob;
+    UINT * pBlobSize;
+    void * pBlobData;
+    UINT * pErrorBlobSize;
+    void * pErrorBlobData;
     HRESULT ret;
 };
 
@@ -1187,29 +1208,48 @@ npt_decode_D3D12SerializeRootSignature_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pRootSignature = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_D3D_ROOT_SIGNATURE_VERSION(dec, &args->Version);
-    {
-        uint64_t _gid;
-        npt_decode_uint64_t(dec, &_gid);
-        args->_guest_id_ppBlob = _gid;
-        args->ppBlob = npt_cs_decoder_alloc_temp(dec, sizeof(void *));
-        if (!args->ppBlob) return;
-        *args->ppBlob = NULL;
+    if (npt_decode_simple_pointer(dec)) {
+        args->pBlobSize = npt_cs_decoder_alloc_temp(dec, sizeof(UINT));
+        if (!args->pBlobSize) return;
+        npt_decode_UINT(dec, (UINT *)args->pBlobSize);
+    } else {
+        args->pBlobSize = NULL;
+        npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
-    {
-        uint64_t _gid;
-        npt_decode_uint64_t(dec, &_gid);
-        args->_guest_id_ppErrorBlob = _gid;
-        args->ppErrorBlob = npt_cs_decoder_alloc_temp(dec, sizeof(void *));
-        if (!args->ppErrorBlob) return;
-        *args->ppErrorBlob = NULL;
+
+    if (npt_decode_simple_pointer(dec)) {
+        args->pErrorBlobSize = npt_cs_decoder_alloc_temp(dec, sizeof(UINT));
+        if (!args->pErrorBlobSize) return;
+        npt_decode_UINT(dec, (UINT *)args->pErrorBlobSize);
+    } else {
+        args->pErrorBlobSize = NULL;
+        npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
+
     /* Allocate temp storage for output-only parameters */
 
 
 
+    if (*args->pBlobSize) {
+        args->pBlobData = npt_cs_decoder_alloc_temp(dec, *args->pBlobSize);
+        if (!args->pBlobData) return;
+        memset(args->pBlobData, 0, *args->pBlobSize);
+    } else {
+        args->pBlobData = NULL;
+    }
 
+    if (*args->pErrorBlobSize) {
+        args->pErrorBlobData = npt_cs_decoder_alloc_temp(dec, *args->pErrorBlobSize);
+        if (!args->pErrorBlobData) return;
+        memset(args->pErrorBlobData, 0, *args->pErrorBlobSize);
+    } else {
+        args->pErrorBlobData = NULL;
+    }
 }
 
 static inline void
@@ -1226,8 +1266,22 @@ npt_encode_D3D12SerializeRootSignature_reply(struct npt_cs_encoder *enc,
         .cmd_return = (uint32_t)args->ret,
     };
     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
-/* skip args->ppBlob (guest-allocated id, registered host-side; not in reply) */
-/* skip args->ppErrorBlob (guest-allocated id, registered host-side; not in reply) */
+    if (npt_encode_simple_pointer(enc, args->pBlobSize))
+        npt_encode_UINT(enc, args->pBlobSize);
+    if (args->pBlobData) {
+        npt_encode_array_count(enc, *args->pBlobSize);
+        npt_encode_blob_array(enc, args->pBlobData, *args->pBlobSize);
+    } else {
+        npt_encode_array_count(enc, 0);
+    }
+    if (npt_encode_simple_pointer(enc, args->pErrorBlobSize))
+        npt_encode_UINT(enc, args->pErrorBlobSize);
+    if (args->pErrorBlobData) {
+        npt_encode_array_count(enc, *args->pErrorBlobSize);
+        npt_encode_blob_array(enc, args->pErrorBlobData, *args->pErrorBlobSize);
+    } else {
+        npt_encode_array_count(enc, 0);
+    }
 }
 
 static inline void
@@ -1254,10 +1308,6 @@ npt_dispatch_D3D12SerializeRootSignature(struct npt_dispatch_context *ctx,
     /* Register any output COM handles.  Top-level functions with a
      * riid + void** pair (CreateDXGIFactory1, D3D12CreateDevice, ...)
      * get runtime type resolution via npt_object_type_from_iid. */
-    if (args.ppBlob && *args.ppBlob)
-        npt_cs_handle_register_guest_id(ctx, args._guest_id_ppBlob, *args.ppBlob, NPT_OBJECT_TYPE_ID3D10BLOB);
-    if (args.ppErrorBlob && *args.ppErrorBlob)
-        npt_cs_handle_register_guest_id(ctx, args._guest_id_ppErrorBlob, *args.ppErrorBlob, NPT_OBJECT_TYPE_ID3D10BLOB);
 
     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
@@ -1277,12 +1327,10 @@ npt_dispatch_D3D12SerializeRootSignature(struct npt_dispatch_context *ctx,
 
 struct npt_command_D3D12SerializeVersionedRootSignature {
     const D3D12_VERSIONED_ROOT_SIGNATURE_DESC * pRootSignature;
-    ID3DBlob ** ppBlob;
-    ID3DBlob ** ppErrorBlob;
-    /* Shadow: guest-allocated id for ppBlob. */
-    uint64_t _guest_id_ppBlob;
-    /* Shadow: guest-allocated id for ppErrorBlob. */
-    uint64_t _guest_id_ppErrorBlob;
+    UINT * pBlobSize;
+    void * pBlobData;
+    UINT * pErrorBlobSize;
+    void * pErrorBlobData;
     HRESULT ret;
 };
 
@@ -1298,27 +1346,46 @@ npt_decode_D3D12SerializeVersionedRootSignature_args_temp(struct npt_cs_decoder 
     } else {
         args->pRootSignature = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
-    {
-        uint64_t _gid;
-        npt_decode_uint64_t(dec, &_gid);
-        args->_guest_id_ppBlob = _gid;
-        args->ppBlob = npt_cs_decoder_alloc_temp(dec, sizeof(void *));
-        if (!args->ppBlob) return;
-        *args->ppBlob = NULL;
+    if (npt_decode_simple_pointer(dec)) {
+        args->pBlobSize = npt_cs_decoder_alloc_temp(dec, sizeof(UINT));
+        if (!args->pBlobSize) return;
+        npt_decode_UINT(dec, (UINT *)args->pBlobSize);
+    } else {
+        args->pBlobSize = NULL;
+        npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
-    {
-        uint64_t _gid;
-        npt_decode_uint64_t(dec, &_gid);
-        args->_guest_id_ppErrorBlob = _gid;
-        args->ppErrorBlob = npt_cs_decoder_alloc_temp(dec, sizeof(void *));
-        if (!args->ppErrorBlob) return;
-        *args->ppErrorBlob = NULL;
+
+    if (npt_decode_simple_pointer(dec)) {
+        args->pErrorBlobSize = npt_cs_decoder_alloc_temp(dec, sizeof(UINT));
+        if (!args->pErrorBlobSize) return;
+        npt_decode_UINT(dec, (UINT *)args->pErrorBlobSize);
+    } else {
+        args->pErrorBlobSize = NULL;
+        npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
+
     /* Allocate temp storage for output-only parameters */
 
 
+    if (*args->pBlobSize) {
+        args->pBlobData = npt_cs_decoder_alloc_temp(dec, *args->pBlobSize);
+        if (!args->pBlobData) return;
+        memset(args->pBlobData, 0, *args->pBlobSize);
+    } else {
+        args->pBlobData = NULL;
+    }
 
+    if (*args->pErrorBlobSize) {
+        args->pErrorBlobData = npt_cs_decoder_alloc_temp(dec, *args->pErrorBlobSize);
+        if (!args->pErrorBlobData) return;
+        memset(args->pErrorBlobData, 0, *args->pErrorBlobSize);
+    } else {
+        args->pErrorBlobData = NULL;
+    }
 }
 
 static inline void
@@ -1335,8 +1402,22 @@ npt_encode_D3D12SerializeVersionedRootSignature_reply(struct npt_cs_encoder *enc
         .cmd_return = (uint32_t)args->ret,
     };
     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
-/* skip args->ppBlob (guest-allocated id, registered host-side; not in reply) */
-/* skip args->ppErrorBlob (guest-allocated id, registered host-side; not in reply) */
+    if (npt_encode_simple_pointer(enc, args->pBlobSize))
+        npt_encode_UINT(enc, args->pBlobSize);
+    if (args->pBlobData) {
+        npt_encode_array_count(enc, *args->pBlobSize);
+        npt_encode_blob_array(enc, args->pBlobData, *args->pBlobSize);
+    } else {
+        npt_encode_array_count(enc, 0);
+    }
+    if (npt_encode_simple_pointer(enc, args->pErrorBlobSize))
+        npt_encode_UINT(enc, args->pErrorBlobSize);
+    if (args->pErrorBlobData) {
+        npt_encode_array_count(enc, *args->pErrorBlobSize);
+        npt_encode_blob_array(enc, args->pErrorBlobData, *args->pErrorBlobSize);
+    } else {
+        npt_encode_array_count(enc, 0);
+    }
 }
 
 static inline void
@@ -1363,10 +1444,6 @@ npt_dispatch_D3D12SerializeVersionedRootSignature(struct npt_dispatch_context *c
     /* Register any output COM handles.  Top-level functions with a
      * riid + void** pair (CreateDXGIFactory1, D3D12CreateDevice, ...)
      * get runtime type resolution via npt_object_type_from_iid. */
-    if (args.ppBlob && *args.ppBlob)
-        npt_cs_handle_register_guest_id(ctx, args._guest_id_ppBlob, *args.ppBlob, NPT_OBJECT_TYPE_ID3D10BLOB);
-    if (args.ppErrorBlob && *args.ppErrorBlob)
-        npt_cs_handle_register_guest_id(ctx, args._guest_id_ppErrorBlob, *args.ppErrorBlob, NPT_OBJECT_TYPE_ID3D10BLOB);
 
     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {

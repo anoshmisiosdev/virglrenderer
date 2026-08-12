@@ -45,6 +45,7 @@ npt_decode_ID3D12DeviceChild_GetDevice_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;

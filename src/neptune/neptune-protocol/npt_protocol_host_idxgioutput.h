@@ -134,6 +134,7 @@ npt_decode_IDXGIOutput_GetDisplayModeList_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pNumModes = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */
@@ -255,6 +256,7 @@ npt_decode_IDXGIOutput_FindClosestMatchingMode_args_temp(struct npt_cs_decoder *
     } else {
         args->pModeToMatch = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     {
@@ -710,6 +712,7 @@ npt_decode_IDXGIOutput_SetGammaControl_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pArray = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -1170,6 +1173,7 @@ npt_decode_IDXGIOutput1_GetDisplayModeList1_args_temp(struct npt_cs_decoder *dec
     } else {
         args->pNumModes = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     /* Allocate temp storage for output-only parameters */
@@ -1291,6 +1295,7 @@ npt_decode_IDXGIOutput1_FindClosestMatchingMode1_args_temp(struct npt_cs_decoder
     } else {
         args->pModeToMatch = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
 
     {
@@ -1894,14 +1899,14 @@ npt_decode_IDXGIOutput5_DuplicateOutput1_args_temp(struct npt_cs_decoder *dec,
     }
     npt_decode_UINT(dec, &args->Flags);
     npt_decode_UINT(dec, &args->SupportedFormatsCount);
+    uint64_t _cnt_pSupportedFormats = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pSupportedFormats = npt_cs_decoder_alloc_temp_array(dec, sizeof(DXGI_FORMAT), _count);
+        _cnt_pSupportedFormats = npt_decode_array_count_unchecked(dec);
+        args->pSupportedFormats = npt_cs_decoder_alloc_temp_array(dec, sizeof(DXGI_FORMAT), _cnt_pSupportedFormats);
         if (!args->pSupportedFormats) return;
-        npt_decode_DXGI_FORMAT_array(dec, (DXGI_FORMAT *)args->pSupportedFormats, _count);
+        npt_decode_DXGI_FORMAT_array(dec, (DXGI_FORMAT *)args->pSupportedFormats, _cnt_pSupportedFormats);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->SupportedFormatsCount); /* unused: count_expr from registry */
         args->pSupportedFormats = NULL;
     }
     {
@@ -1911,6 +1916,11 @@ npt_decode_IDXGIOutput5_DuplicateOutput1_args_temp(struct npt_cs_decoder *dec,
         args->ppOutputDuplication = npt_cs_decoder_alloc_temp(dec, sizeof(void *));
         if (!args->ppOutputDuplication) return;
         *args->ppOutputDuplication = NULL;
+    }
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pSupportedFormats && _cnt_pSupportedFormats < (uint64_t)(args->SupportedFormatsCount)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 

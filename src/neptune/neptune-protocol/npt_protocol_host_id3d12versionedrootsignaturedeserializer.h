@@ -175,7 +175,9 @@ npt_dispatch_ID3D12VersionedRootSignatureDeserializer_GetUnconvertedRootSignatur
     if (ctx->id3d12versionedrootsignaturedeserializer_dispatch_overrides && ctx->id3d12versionedrootsignaturedeserializer_dispatch_overrides->GetUnconvertedRootSignatureDesc) {
         args.ret = ctx->id3d12versionedrootsignaturedeserializer_dispatch_overrides->GetUnconvertedRootSignatureDesc(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* COM x64 aggregate-return ABI: the hidden pointer (&args.ret)
+         * rides in the call args; the returned pointer aliases it. */
+        (void)_original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so

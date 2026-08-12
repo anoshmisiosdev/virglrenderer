@@ -161,8 +161,8 @@ npt_override_D3D12SerializeRootSignature(
    struct npt_command_D3D12SerializeRootSignature *args)
 {
    args->ret = NPT_E_NOTIMPL;
-   if (args->ppBlob) *args->ppBlob = NULL;
-   if (args->ppErrorBlob) *args->ppErrorBlob = NULL;
+   if (args->pBlobSize) *args->pBlobSize = 0;
+   if (args->pErrorBlobSize) *args->pErrorBlobSize = 0;
    return args->ret;
 }
 
@@ -172,8 +172,8 @@ npt_override_D3D12SerializeVersionedRootSignature(
    struct npt_command_D3D12SerializeVersionedRootSignature *args)
 {
    args->ret = NPT_E_NOTIMPL;
-   if (args->ppBlob) *args->ppBlob = NULL;
-   if (args->ppErrorBlob) *args->ppErrorBlob = NULL;
+   if (args->pBlobSize) *args->pBlobSize = 0;
+   if (args->pErrorBlobSize) *args->pErrorBlobSize = 0;
    return args->ret;
 }
 

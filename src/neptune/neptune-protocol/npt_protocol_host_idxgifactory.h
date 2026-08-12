@@ -338,6 +338,7 @@ npt_decode_IDXGIFactory_CreateSwapChain_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -846,6 +847,7 @@ npt_decode_IDXGIFactory2_CreateSwapChainForHwnd_args_temp(struct npt_cs_decoder 
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->pFullscreenDesc = npt_cs_decoder_alloc_temp(dec, sizeof(DXGI_SWAP_CHAIN_FULLSCREEN_DESC));
@@ -989,6 +991,7 @@ npt_decode_IDXGIFactory2_CreateSwapChainForCoreWindow_args_temp(struct npt_cs_de
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;
@@ -1784,6 +1787,7 @@ npt_decode_IDXGIFactory2_CreateSwapChainForComposition_args_temp(struct npt_cs_d
     } else {
         args->pDesc = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         npt_object_id _id;
@@ -1989,6 +1993,7 @@ npt_decode_IDXGIFactory4_EnumAdapterByLuid_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -2102,6 +2107,7 @@ npt_decode_IDXGIFactory4_EnumWarpAdapter_args_temp(struct npt_cs_decoder *dec,
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -2325,6 +2331,7 @@ npt_decode_IDXGIFactory6_EnumAdapterByGpuPreference_args_temp(struct npt_cs_deco
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;

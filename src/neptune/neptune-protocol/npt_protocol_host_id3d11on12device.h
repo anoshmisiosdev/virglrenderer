@@ -54,6 +54,7 @@ npt_decode_ID3D11On12Device_CreateWrappedResource_args_temp(struct npt_cs_decode
     } else {
         args->pFlags11 = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     npt_decode_D3D12_RESOURCE_STATES(dec, &args->InState);
     npt_decode_D3D12_RESOURCE_STATES(dec, &args->OutState);
@@ -64,6 +65,7 @@ npt_decode_ID3D11On12Device_CreateWrappedResource_args_temp(struct npt_cs_decode
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -168,21 +170,24 @@ npt_decode_ID3D11On12Device_ReleaseWrappedResources_args_temp(struct npt_cs_deco
                                                               struct npt_command_ID3D11On12Device_ReleaseWrappedResources *args)
 {
     /* Decode input parameters from the wire */
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppResources) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppResources[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppResources = NULL;
+    uint64_t _cnt_ppResources = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppResources) {
+        args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppResources);
+        if (!args->ppResources) return;
+        for (uint64_t _i = 0; _i < _cnt_ppResources; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppResources[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppResources = NULL;
     }
     npt_decode_UINT(dec, &args->NumResources);
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppResources && _cnt_ppResources < (uint64_t)(args->NumResources)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 
@@ -274,21 +279,24 @@ npt_decode_ID3D11On12Device_AcquireWrappedResources_args_temp(struct npt_cs_deco
                                                               struct npt_command_ID3D11On12Device_AcquireWrappedResources *args)
 {
     /* Decode input parameters from the wire */
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppResources) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppResources[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppResources = NULL;
+    uint64_t _cnt_ppResources = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppResources) {
+        args->ppResources = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppResources);
+        if (!args->ppResources) return;
+        for (uint64_t _i = 0; _i < _cnt_ppResources; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppResources[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppResources = NULL;
     }
     npt_decode_UINT(dec, &args->NumResources);
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_ppResources && _cnt_ppResources < (uint64_t)(args->NumResources)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
     /* Allocate temp storage for output-only parameters */
 
 
@@ -393,6 +401,7 @@ npt_decode_ID3D11On12Device1_GetD3D12Device_args_temp(struct npt_cs_decoder *dec
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -513,6 +522,7 @@ npt_decode_ID3D11On12Device2_UnwrapUnderlyingResource_args_temp(struct npt_cs_de
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -625,29 +635,36 @@ npt_decode_ID3D11On12Device2_ReturnUnderlyingResource_args_temp(struct npt_cs_de
         args->pResource11 = (ID3D11Resource *)npt_object_from_id(_id);
     }
     npt_decode_UINT(dec, &args->NumSync);
+    uint64_t _cnt_pSignalValues = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pSignalValues = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT64), _count);
+        _cnt_pSignalValues = npt_decode_array_count_unchecked(dec);
+        args->pSignalValues = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT64), _cnt_pSignalValues);
         if (!args->pSignalValues) return;
-        npt_decode_UINT64_array(dec, (UINT64 *)args->pSignalValues, _count);
+        npt_decode_UINT64_array(dec, (UINT64 *)args->pSignalValues, _cnt_pSignalValues);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumSync); /* unused: count_expr from registry */
         args->pSignalValues = NULL;
     }
-    {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        if (_count) {
-            args->ppFences = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _count);
-            if (!args->ppFences) return;
-            for (uint64_t _i = 0; _i < _count; _i++) {
-                npt_object_id _id;
-                npt_decode_uint64_t(dec, &_id);
-                args->ppFences[_i] = npt_object_from_id(_id);
-            }
-        } else {
-            args->ppFences = NULL;
+    uint64_t _cnt_ppFences = npt_decode_array_count_unchecked(dec);
+    if (_cnt_ppFences) {
+        args->ppFences = npt_cs_decoder_alloc_temp_array(dec, sizeof(void *), _cnt_ppFences);
+        if (!args->ppFences) return;
+        for (uint64_t _i = 0; _i < _cnt_ppFences; _i++) {
+            npt_object_id _id;
+            npt_decode_uint64_t(dec, &_id);
+            args->ppFences[_i] = npt_object_from_id(_id);
         }
+    } else {
+        args->ppFences = NULL;
+    }
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pSignalValues && _cnt_pSignalValues < (uint64_t)(args->NumSync)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_ppFences && _cnt_ppFences < (uint64_t)(args->NumSync)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 

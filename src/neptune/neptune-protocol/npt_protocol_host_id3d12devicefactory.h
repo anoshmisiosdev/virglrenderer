@@ -381,6 +381,7 @@ npt_decode_ID3D12DeviceFactory_GetConfigurationInterface_args_temp(struct npt_cs
     } else {
         args->clsid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     if (npt_decode_simple_pointer(dec)) {
         args->iid = npt_cs_decoder_alloc_temp(dec, sizeof(IID));
@@ -389,6 +390,7 @@ npt_decode_ID3D12DeviceFactory_GetConfigurationInterface_args_temp(struct npt_cs
     } else {
         args->iid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
@@ -493,15 +495,15 @@ npt_decode_ID3D12DeviceFactory_EnableExperimentalFeatures_args_temp(struct npt_c
 {
     /* Decode input parameters from the wire */
     npt_decode_UINT(dec, &args->NumFeatures);
+    uint64_t _cnt_pIIDs = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pIIDs = npt_cs_decoder_alloc_temp_array(dec, sizeof(IID), _count);
+        _cnt_pIIDs = npt_decode_array_count_unchecked(dec);
+        args->pIIDs = npt_cs_decoder_alloc_temp_array(dec, sizeof(IID), _cnt_pIIDs);
         if (!args->pIIDs) return;
-        for (uint32_t _i = 0; _i < (uint32_t)_count; _i++)
+        for (uint32_t _i = 0; _i < (uint32_t)_cnt_pIIDs; _i++)
             npt_decode_IID(dec, (IID *)&args->pIIDs[_i]);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumFeatures); /* unused: count_expr from registry */
         args->pIIDs = NULL;
     }
     {
@@ -514,15 +516,24 @@ npt_decode_ID3D12DeviceFactory_EnableExperimentalFeatures_args_temp(struct npt_c
             args->pConfigurationStructs = NULL;
         }
     }
+    uint64_t _cnt_pConfigurationStructSizes = 0;
     if (npt_peek_array_count(dec)) {
-        const uint64_t _count = npt_decode_array_count_unchecked(dec);
-        args->pConfigurationStructSizes = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _count);
+        _cnt_pConfigurationStructSizes = npt_decode_array_count_unchecked(dec);
+        args->pConfigurationStructSizes = npt_cs_decoder_alloc_temp_array(dec, sizeof(UINT), _cnt_pConfigurationStructSizes);
         if (!args->pConfigurationStructSizes) return;
-        npt_decode_UINT_array(dec, (UINT *)args->pConfigurationStructSizes, _count);
+        npt_decode_UINT_array(dec, (UINT *)args->pConfigurationStructSizes, _cnt_pConfigurationStructSizes);
     } else {
         (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */
-        (void)(args->NumFeatures); /* unused: count_expr from registry */
         args->pConfigurationStructSizes = NULL;
+    }
+    /* A counted array must carry every element the callee will read. */
+    if (_cnt_pIIDs && _cnt_pIIDs < (uint64_t)(args->NumFeatures)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
+    }
+    if (_cnt_pConfigurationStructSizes && _cnt_pConfigurationStructSizes < (uint64_t)(args->NumFeatures)) {
+        npt_cs_decoder_set_fatal(dec);
+        return;
     }
     /* Allocate temp storage for output-only parameters */
 
@@ -633,6 +644,7 @@ npt_decode_ID3D12DeviceFactory_CreateDevice_args_temp(struct npt_cs_decoder *dec
     } else {
         args->riid = NULL;
         npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
+        return;
     }
     {
         uint64_t _gid;
