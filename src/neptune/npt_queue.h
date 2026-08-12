@@ -22,13 +22,30 @@ struct npt_queue_sync {
     * retires immediately.  Closed by the worker after the wait. */
    int sync_fd;
 
-   uint32_t flags;
    uint32_t ring_idx;
    uint64_t fence_id;
 
-   /* Bumped on each poll(sync_fd) timeout; once it crosses a
-    * threshold the worker retires as device-lost rather than spin. */
-   unsigned timeouts;
+   /* Non-zero: an AUTO_RELEASE arm's transferred proxy reference; the
+    * worker releases it after the fence retires, so the signal handle
+    * the D3D library stored stays valid until it has been written. */
+   uint64_t release_token;
+
+   /* Value-gated retirement (GATE_WAIT): retire only once
+    * GetCompletedValue(check_fence) >= check_value.  check_fence carries
+    * an IUnknown reference released at retirement. */
+   void *check_fence;
+   uint64_t check_value;
+   /* Out-of-order wakeup observed: switch to short-period polling so a
+    * fire consumed by an earlier gate on the same ring can't stall this
+    * one for a full poll period. */
+   bool fast_poll;
+
+   /* CLOCK_MONOTONIC instant past which the worker gives up and retires
+    * the fence as device-lost rather than trap the guest forever.
+    * Stamped at submit, not on reaching the head of the queue, so it
+    * measures how long the guest has actually been waiting and a wedged
+    * ring unwinds its whole backlog inside one budget. */
+   uint64_t deadline_ns;
 
    struct list_head head;
 };
@@ -37,8 +54,6 @@ struct npt_queue {
    struct npt_context *context;
    uint32_t ring_idx;
 
-   /* Submitted fences go on sync_thread.syncs.  The worker pops in
-    * order, polls on sync_fd, and retires via ctx->retire_fence. */
    struct {
       mtx_t mutex;
       cnd_t cond;
@@ -54,11 +69,11 @@ npt_queue_create(struct npt_context *ctx, uint32_t ring_idx);
 void
 npt_queue_destroy(struct npt_queue *queue);
 
+struct npt_event_paired;
 bool
 npt_queue_sync_submit(struct npt_queue *queue,
-                      uint32_t flags,
                       uint32_t ring_idx,
                       uint64_t fence_id,
-                      int sync_fd);
+                      const struct npt_event_paired *paired);
 
 #endif /* NPT_QUEUE_H */

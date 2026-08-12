@@ -113,6 +113,7 @@ neptune_sources = [
    'neptune/npt_cs.c',
    'neptune/npt_feedback.c',
    'neptune/npt_event.c',
+   'neptune/npt_heap12.c',
    'neptune/npt_library.c',
    'neptune/npt_profile.c',
    'neptune/npt_overrides_d3d11_fence.c',
@@ -125,6 +126,8 @@ neptune_sources = [
    'neptune/npt_dispatch.c',
    'neptune/npt_overrides_toplevel.c',
    'neptune/npt_overrides_shared_handle.c',
+   'neptune/npt_overrides_d3d12_device.c',
+   'neptune/npt_overrides_d3d12_fence.c',
 ]
 
 drm_sources = [

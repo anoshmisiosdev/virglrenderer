@@ -19,10 +19,6 @@
 /* DXGI factory creation                                                */
 /* ================================================================== */
 
-/* The generated dispatcher emits object-table registration for the
- * returned ppFactory / ppDevice automatically; no manual register
- * call is needed here. */
-
 static HRESULT
 npt_override_CreateDXGIFactory(UNUSED struct npt_dispatch_context *dctx,
                                struct npt_command_CreateDXGIFactory *args)
@@ -155,15 +151,169 @@ npt_override_D3D12CreateVersionedRootSignatureDeserializer(
    return args->ret;
 }
 
+/* ID3DBlob accessors via raw vtable slots (3 = GetBufferPointer,
+ * 4 = GetBufferSize, 2 = Release; see NPT_VTBL_ID3D10Blob_*). */
+typedef void *(NPT_STDMETHODCALLTYPE *pfn_npt_blob_get_pointer)(void *self);
+typedef SIZE_T (NPT_STDMETHODCALLTYPE *pfn_npt_blob_get_size)(void *self);
+
+#define NPT_E_NOT_SUFFICIENT_BUFFER ((HRESULT)0x8007007A)
+
+/* Copy a host ID3DBlob into a guest-capacity byte window.  *size_inout
+ * carries the guest capacity in and the actual/required size out;
+ * *data_inout is the window, cleared when nothing was written.
+ *
+ * Both the reply encoder and the guest's reply decoder size the payload
+ * from the returned *size_inout, and the guest reserved its reply window
+ * from the capacity it sent.  So the returned size may exceed capacity
+ * (the guest needs it to retry with an exact allocation) only if the
+ * data pointer is cleared with it -- otherwise the encoder reads past
+ * the decoder's capacity-sized temp buffer and the guest writes past its
+ * own. */
+static HRESULT
+npt_blob_copy_out(ID3DBlob *blob, UINT *size_inout, void **data_inout)
+{
+   void *data_out = *data_inout;
+   *data_inout = NULL;
+
+   if (!size_inout)
+      return NPT_S_OK;
+   if (!blob) {
+      *size_inout = 0;
+      return NPT_S_OK;
+   }
+
+   void **vtbl = npt_com_vtable(blob);
+   void *src = NPT_COM_VTBL_FUNC(pfn_npt_blob_get_pointer, vtbl,
+                                 NPT_VTBL_ID3D10Blob_GetBufferPointer)(blob);
+   SIZE_T size = NPT_COM_VTBL_FUNC(pfn_npt_blob_get_size, vtbl,
+                                   NPT_VTBL_ID3D10Blob_GetBufferSize)(blob);
+
+   UINT capacity = *size_inout;
+   *size_inout = (UINT)size;
+   if (!data_out || size > capacity)
+      return NPT_E_NOT_SUFFICIENT_BUFFER;
+   if (src && size)
+      memcpy(data_out, src, size);
+   *data_inout = data_out;
+   return NPT_S_OK;
+}
+
+static void
+npt_blob_release(ID3DBlob *blob)
+{
+   if (!blob)
+      return;
+   PFN_IUnknown_Release fn = NPT_COM_VTBL_FUNC(
+      PFN_IUnknown_Release, npt_com_vtable(blob), 2);
+   fn(blob);
+}
+
+static void
+npt_serialize_clear_sizes(UINT *blob_size, UINT *error_size)
+{
+   if (blob_size)
+      *blob_size = 0;
+   if (error_size)
+      *error_size = 0;
+}
+
+/* Move the serializer's blobs into the reply buffers and drop the host
+ * copies.  Error text is advisory: an over-long diagnostic degrades to
+ * size-only rather than failing the whole call. */
+static HRESULT
+npt_serialize_finish(HRESULT hr, ID3DBlob *blob, ID3DBlob *error_blob,
+                     UINT *blob_size, void **blob_data,
+                     UINT *error_size, void **error_data)
+{
+   (void)npt_blob_copy_out(error_blob, error_size, error_data);
+   if (hr >= 0) {
+      const HRESULT copy_hr = npt_blob_copy_out(blob, blob_size, blob_data);
+      if (copy_hr < 0)
+         hr = copy_hr;
+   } else {
+      if (blob_size)
+         *blob_size = 0;
+      *blob_data = NULL;
+   }
+
+   npt_blob_release(blob);
+   npt_blob_release(error_blob);
+   return hr;
+}
+
+/* The serializers dereference the parameter/sampler arrays without
+ * validating, and this runs in the shared render server: a malformed
+ * guest desc must fail cleanly, not SIGSEGV the worker. */
+static bool
+npt_root_params_valid(UINT num_params, const void *params,
+                      UINT num_samplers, const void *samplers)
+{
+   return (!num_params || params) && (!num_samplers || samplers);
+}
+
+static bool
+npt_root_signature_desc_valid(const D3D12_ROOT_SIGNATURE_DESC *desc)
+{
+   return desc && npt_root_params_valid(desc->NumParameters,
+                                        desc->pParameters,
+                                        desc->NumStaticSamplers,
+                                        desc->pStaticSamplers);
+}
+
 static HRESULT
 npt_override_D3D12SerializeRootSignature(
    UNUSED struct npt_dispatch_context *dctx,
    struct npt_command_D3D12SerializeRootSignature *args)
 {
-   args->ret = NPT_E_NOTIMPL;
-   if (args->pBlobSize) *args->pBlobSize = 0;
-   if (args->pErrorBlobSize) *args->pErrorBlobSize = 0;
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   if (!lib || !lib->pfn_D3D12SerializeRootSignature) {
+      npt_serialize_clear_sizes(args->pBlobSize, args->pErrorBlobSize);
+      args->ret = NPT_E_NOTIMPL;
+      return args->ret;
+   }
+
+   if (!npt_root_signature_desc_valid(args->pRootSignature)) {
+      npt_serialize_clear_sizes(args->pBlobSize, args->pErrorBlobSize);
+      args->ret = NPT_E_INVALIDARG;
+      return args->ret;
+   }
+
+   ID3DBlob *blob = NULL;
+   ID3DBlob *error_blob = NULL;
+   const HRESULT hr = lib->pfn_D3D12SerializeRootSignature(
+      args->pRootSignature, args->Version, &blob, &error_blob);
+
+   args->ret = npt_serialize_finish(hr, blob, error_blob,
+                                    args->pBlobSize, &args->pBlobData,
+                                    args->pErrorBlobSize,
+                                    &args->pErrorBlobData);
    return args->ret;
+}
+
+static bool
+npt_versioned_root_signature_desc_valid(
+   const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *desc)
+{
+   if (!desc)
+      return false;
+   switch (desc->Version) {
+   case D3D_ROOT_SIGNATURE_VERSION_1_0:
+      return npt_root_signature_desc_valid(&desc->Desc_1_0);
+   case D3D_ROOT_SIGNATURE_VERSION_1_1:
+      return npt_root_params_valid(desc->Desc_1_1.NumParameters,
+                                   desc->Desc_1_1.pParameters,
+                                   desc->Desc_1_1.NumStaticSamplers,
+                                   desc->Desc_1_1.pStaticSamplers);
+   case D3D_ROOT_SIGNATURE_VERSION_1_2:
+      return npt_root_params_valid(desc->Desc_1_2.NumParameters,
+                                   desc->Desc_1_2.pParameters,
+                                   desc->Desc_1_2.NumStaticSamplers,
+                                   desc->Desc_1_2.pStaticSamplers);
+   default:
+      /* Unknown version: the backend switches on Version before touching
+       * any array, so let it reject the desc. */
+      return true;
+   }
 }
 
 static HRESULT
@@ -171,9 +321,28 @@ npt_override_D3D12SerializeVersionedRootSignature(
    UNUSED struct npt_dispatch_context *dctx,
    struct npt_command_D3D12SerializeVersionedRootSignature *args)
 {
-   args->ret = NPT_E_NOTIMPL;
-   if (args->pBlobSize) *args->pBlobSize = 0;
-   if (args->pErrorBlobSize) *args->pErrorBlobSize = 0;
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   if (!lib || !lib->pfn_D3D12SerializeVersionedRootSignature) {
+      npt_serialize_clear_sizes(args->pBlobSize, args->pErrorBlobSize);
+      args->ret = NPT_E_NOTIMPL;
+      return args->ret;
+   }
+
+   if (!npt_versioned_root_signature_desc_valid(args->pRootSignature)) {
+      npt_serialize_clear_sizes(args->pBlobSize, args->pErrorBlobSize);
+      args->ret = NPT_E_INVALIDARG;
+      return args->ret;
+   }
+
+   ID3DBlob *blob = NULL;
+   ID3DBlob *error_blob = NULL;
+   const HRESULT hr = lib->pfn_D3D12SerializeVersionedRootSignature(
+      args->pRootSignature, &blob, &error_blob);
+
+   args->ret = npt_serialize_finish(hr, blob, error_blob,
+                                    args->pBlobSize, &args->pBlobData,
+                                    args->pErrorBlobSize,
+                                    &args->pErrorBlobData);
    return args->ret;
 }
 

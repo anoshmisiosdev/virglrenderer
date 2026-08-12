@@ -16,6 +16,7 @@
 #include <virglrenderer.h>
 #include "virgl_hw.h"
 #include "drm/drm-uapi/virtgpu_drm.h"
+#include "neptune/neptune-protocol/npt_protocol_defs.h"
 #include "neptune_hw.h"
 
 static struct virgl_renderer_callbacks test_cbs;
@@ -87,7 +88,9 @@ test_neptune_get_capset(void)
    struct virgl_renderer_capset_neptune caps;
    memset(&caps, 0xff, sizeof(caps));
    virgl_renderer_fill_caps(VIRTGPU_DRM_CAPSET_NEPTUNE, 0, &caps);
-   EXPECT(caps.wire_format_version == 1u);
+   /* fill_caps must advertise exactly what the generated protocol
+    * headers define -- a mismatch means the capset plumbing is stale. */
+   EXPECT(caps.wire_format_version == NPT_PROTOCOL_WIRE_VERSION);
 
    teardown();
    return 1;

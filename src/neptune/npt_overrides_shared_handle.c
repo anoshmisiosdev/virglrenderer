@@ -14,7 +14,9 @@
  *
  * Every shared-HANDLE entry point fails with E_INVALIDARG before
  * reaching the host library, zeroing output handles/objects so the
- * post-dispatch register pass skips registration.
+ * post-dispatch register pass skips registration.  The ID3D12Device
+ * ones are in npt_overrides_d3d12_device.c, with the rest of that
+ * interface's table.
  */
 
 #include "npt_overrides.h"
@@ -22,7 +24,6 @@
 #include "neptune-protocol/npt_protocol_defs.h"
 #include "neptune-protocol/npt_protocol_host_id3d11device.h"
 #include "neptune-protocol/npt_protocol_host_id3d11fence.h"
-#include "neptune-protocol/npt_protocol_host_id3d12device.h"
 #include "neptune-protocol/npt_protocol_host_idxgiresource.h"
 
 /* -------------------------------------------------------------------- */
@@ -61,30 +62,6 @@ reject_ID3D11Fence_CreateSharedHandle(
 {
    if (args->pHandle)
       *args->pHandle = (HANDLE)0;
-   args->ret = NPT_E_INVALIDARG;
-   return args->ret;
-}
-
-static HRESULT
-reject_ID3D12Device_CreateSharedHandle(
-   UNUSED struct npt_dispatch_context *ctx,
-   struct npt_command_ID3D12Device_CreateSharedHandle *args,
-   UNUSED PFN_ID3D12Device_CreateSharedHandle original)
-{
-   if (args->pHandle)
-      *args->pHandle = (HANDLE)0;
-   args->ret = NPT_E_INVALIDARG;
-   return args->ret;
-}
-
-static HRESULT
-reject_ID3D12Device_OpenSharedHandleByName(
-   UNUSED struct npt_dispatch_context *ctx,
-   struct npt_command_ID3D12Device_OpenSharedHandleByName *args,
-   UNUSED PFN_ID3D12Device_OpenSharedHandleByName original)
-{
-   if (args->pNTHandle)
-      *args->pNTHandle = (HANDLE)0;
    args->ret = NPT_E_INVALIDARG;
    return args->ret;
 }
@@ -141,18 +118,6 @@ reject_ID3D11Device5_OpenSharedFence(
    return args->ret;
 }
 
-static HRESULT
-reject_ID3D12Device_OpenSharedHandle(
-   UNUSED struct npt_dispatch_context *ctx,
-   struct npt_command_ID3D12Device_OpenSharedHandle *args,
-   UNUSED PFN_ID3D12Device_OpenSharedHandle original)
-{
-   if (args->ppvObj)
-      *args->ppvObj = NULL;
-   args->ret = NPT_E_INVALIDARG;
-   return args->ret;
-}
-
 /* -------------------------------------------------------------------- */
 /* Override tables                                                      */
 /* -------------------------------------------------------------------- */
@@ -180,10 +145,4 @@ struct npt_dispatch_id3d11device5_overrides npt_id3d11device5_overrides = {
 
 struct npt_dispatch_id3d11fence_overrides npt_id3d11fence_overrides = {
    .CreateSharedHandle = reject_ID3D11Fence_CreateSharedHandle,
-};
-
-struct npt_dispatch_id3d12device_overrides npt_id3d12device_overrides = {
-   .CreateSharedHandle = reject_ID3D12Device_CreateSharedHandle,
-   .OpenSharedHandle = reject_ID3D12Device_OpenSharedHandle,
-   .OpenSharedHandleByName = reject_ID3D12Device_OpenSharedHandleByName,
 };

@@ -25,6 +25,7 @@
 
 #include "neptune-protocol/npt_protocol_host_dispatch_types.h"
 #include "neptune-protocol/npt_protocol_host_id3d11fence.h"
+#include "neptune-protocol/npt_protocol_host_id3d12fence.h"
 
 /* ================================================================== */
 /* Substrate                                                           */
@@ -167,7 +168,9 @@ npt_feedback_register_locked(struct npt_context *ctx,
       entry->cookie = 0;
       entry->version = 0;
       entry->target_value = 0;
+      entry->published_high = 0;
       entry->persistent = false;
+      entry->rewound = false;
       /* Keep mutex held: caller sets type-specific fields then calls
        * npt_feedback_state_unlock. */
       return entry;
@@ -261,6 +264,7 @@ npt_feedback_poll(struct npt_context *ctx)
          remove = npt_feedback_query_poll_one(ctx, entry);
          break;
       case NPT_FEEDBACK_TYPE_FENCE:
+      case NPT_FEEDBACK_TYPE_FENCE12:
          remove = npt_feedback_fence_poll_one(ctx, entry);
          break;
       default:
@@ -404,17 +408,39 @@ npt_feedback_query_mark_end(struct npt_context *ctx,
 /* D3D11 has no ID3D11Fence::Signal; the lifecycle hook lives on
  * ID3D11DeviceContext4::Signal and calls npt_feedback_fence_mark_signal. */
 
+static bool
+npt_feedback_type_is_fence(uint8_t type)
+{
+   return type == NPT_FEEDBACK_TYPE_FENCE ||
+          type == NPT_FEEDBACK_TYPE_FENCE12;
+}
+
 void
 npt_feedback_fence_register(struct npt_context *ctx,
                             uint64_t fence_id,
                             uint32_t fb_res_id,
-                            uint32_t fb_offset)
+                            uint32_t fb_offset,
+                            uint32_t fence_api)
 {
    if (!ctx || !fence_id || !fb_res_id)
       return;
 
+   uint8_t type;
+   switch (fence_api) {
+   case NPT_FENCE_FEEDBACK_API_D3D11:
+      type = NPT_FEEDBACK_TYPE_FENCE;
+      break;
+   case NPT_FENCE_FEEDBACK_API_D3D12:
+      type = NPT_FEEDBACK_TYPE_FENCE12;
+      break;
+   default:
+      npt_log("fence feedback: unknown fence_api %u for obj 0x%" PRIx64,
+              fence_api, fence_id);
+      return;
+   }
+
    struct npt_feedback_entry *entry = npt_feedback_register_locked(
-      ctx, fence_id, NPT_FEEDBACK_TYPE_FENCE, fb_res_id, fb_offset,
+      ctx, fence_id, type, fb_res_id, fb_offset,
       sizeof(struct npt_d3d11_fence_feedback_slot));
    if (!entry)
       return;
@@ -434,10 +460,17 @@ npt_feedback_fence_mark_signal(struct npt_context *ctx, void *host_fence,
 
    npt_feedback_state_lock(ctx);
    /* Fast path: entry's host_obj already resolved (every Signal
-    * after the first hits this). */
-   struct npt_feedback_entry *entry =
-      npt_feedback_lookup_by_host_obj_locked(
-         ctx, host_fence, NPT_FEEDBACK_TYPE_FENCE);
+    * after the first hits this).  Both fence types share one host
+    * pointer namespace, so scan for either. */
+   struct npt_feedback_entry *entry = NULL;
+   hash_table_foreach(ctx->feedback.table, e) {
+      struct npt_feedback_entry *cand = e->data;
+      if (npt_feedback_type_is_fence(cand->type) &&
+          cand->host_obj == host_fence) {
+         entry = cand;
+         break;
+      }
+   }
    if (!entry) {
       /* First-time resolve: fence registered before any Signal hasn't
        * had host_obj cached.  Walk fence entries with NULL host_obj
@@ -445,7 +478,7 @@ npt_feedback_fence_mark_signal(struct npt_context *ctx, void *host_fence,
        * small. */
       hash_table_foreach(ctx->feedback.table, e) {
          struct npt_feedback_entry *cand = e->data;
-         if (cand->type != NPT_FEEDBACK_TYPE_FENCE || cand->host_obj)
+         if (!npt_feedback_type_is_fence(cand->type) || cand->host_obj)
             continue;
          cand->host_obj = npt_context_lookup_object(
             ctx, NULL, cand->obj_id, NPT_OBJECT_TYPE_IUNKNOWN);
@@ -455,10 +488,14 @@ npt_feedback_fence_mark_signal(struct npt_context *ctx, void *host_fence,
          }
       }
    }
-   if (entry) {
+   /* A fence the host has seen rewind owes no further polls: the guest
+    * reads such a fence over the wire rather than from the slot. */
+   const bool armed = entry && !entry->rewound;
+   if (armed) {
       /* Raise the bar the poller has to clear before it may drop this
-       * entry.  Signals can be dispatched out of order relative to GPU
-       * execution, so only ever move the target forward. */
+       * entry.  Signals from different queues reach different ring
+       * threads and can be dispatched in either order, so only ever move
+       * the target forward. */
       if (value > entry->target_value)
          entry->target_value = value;
       npt_feedback_set_pending_locked(ctx, entry);
@@ -471,7 +508,7 @@ npt_feedback_fence_mark_signal(struct npt_context *ctx, void *host_fence,
     * elsewhere, so tell every ring a poll is owed rather than relying on
     * that.  After the state unlock: npt_ring_notify_feedback() takes
     * ring->mutex, which the poll path nests the other way round. */
-   if (entry)
+   if (armed)
       npt_context_notify_rings_feedback(ctx);
 }
 
@@ -502,13 +539,43 @@ npt_feedback_fence_poll_one(struct npt_context *ctx,
 
    /* The substrate poll holds st->mutex across this call so no two
     * threads write the same slot concurrently; the release store
-    * publishes the value to the guest's local read. */
-   PFN_ID3D11Fence_GetCompletedValue get_completed_value =
-      NPT_COM_VTBL_FUNC(PFN_ID3D11Fence_GetCompletedValue,
-                        npt_com_vtable(entry->host_obj),
-                        NPT_VTBL_ID3D11Fence_GetCompletedValue);
-   const UINT64 val = get_completed_value(entry->host_obj);
+    * publishes the value to the guest's local read.  Plain snapshot
+    * store, NOT a monotonic max: D3D12 fences may be legally rewound
+    * (Signal(lower)), and for monotonic D3D11 fences the snapshot is
+    * a valid lower bound anyway. */
+   UINT64 val;
+   if (entry->type == NPT_FEEDBACK_TYPE_FENCE12) {
+      PFN_ID3D12Fence_GetCompletedValue get12 =
+         NPT_COM_VTBL_FUNC(PFN_ID3D12Fence_GetCompletedValue,
+                           npt_com_vtable(entry->host_obj),
+                           NPT_VTBL_ID3D12Fence_GetCompletedValue);
+      val = get12(entry->host_obj);
+   } else {
+      PFN_ID3D11Fence_GetCompletedValue get11 =
+         NPT_COM_VTBL_FUNC(PFN_ID3D11Fence_GetCompletedValue,
+                           npt_com_vtable(entry->host_obj),
+                           NPT_VTBL_ID3D11Fence_GetCompletedValue);
+      val = get11(entry->host_obj);
+   }
    atomic_store_explicit(&slot->completed_value, (uint64_t)val,
                          memory_order_release);
+
+   /* D3D12 permits Signal to a lower value, and target_value only ever
+    * rises, so a rewound fence could never clear it again: latch the
+    * observation and stop owing polls, rather than hold every ring
+    * thread of this context in the 100 us feedback cadence for the rest
+    * of the session.  Latched on an observed decrease of the value
+    * itself, not on the requested one -- a Signal(lower) dispatched
+    * ahead of a concurrent Signal(higher) from another queue is
+    * ordinary reordering, not a rewind. */
+   if ((uint64_t)val < entry->published_high) {
+      entry->rewound = true;
+      npt_log("fence feedback: obj 0x%" PRIx64 " rewound to %" PRIu64
+              " from %" PRIu64 "; guest reads it over the wire from now on",
+              entry->obj_id, (uint64_t)val, entry->published_high);
+      return true;
+   }
+   entry->published_high = (uint64_t)val;
+
    return (uint64_t)val >= entry->target_value;
 }

@@ -5,6 +5,12 @@
 
 #include "npt_common.h"
 
+#include <stdlib.h>
+
+#ifdef HAVE_DLFCN_H
+#include <dlfcn.h>
+#endif
+
 #include "drm-uapi/virtgpu_drm.h"
 #include "neptune-protocol/npt_protocol_defs.h"
 #include "neptune_hw.h"
@@ -22,13 +28,59 @@ struct npt_renderer_state {
 
 static struct npt_renderer_state npt_state;
 
+/* Whether the D3D12 backend library exists and exports D3D12CreateDevice.
+ *
+ * Probed with a private dlopen rather than from npt_library state,
+ * because the capset is reported before any context -- and so before
+ * npt_library_init -- exists.  The dlopen refcount makes the later real
+ * load cheap.
+ *
+ * A split-arch proxy runs on a different arch than the render server, so
+ * its local dlopen proves nothing and the answer has to be overridden
+ * instead.
+ */
+static bool
+npt_capset_probe_d3d12(void)
+{
+   const long override = npt_capset_d3d12_override();
+   if (override >= 0)
+      return override != 0;
+
+#ifdef HAVE_DLFCN_H
+   const char *path = getenv(NPT_D3D12_LIBRARY_ENV);
+   if (!path)
+      path = NPT_D3D12_LIBRARY_DEFAULT;
+
+   void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+   if (!handle) {
+      npt_log("capset: no D3D12 on this host (%s: %s)", path, dlerror());
+      return false;
+   }
+
+   bool has_entry = dlsym(handle, "D3D12CreateDevice") != NULL;
+   if (!has_entry)
+      npt_log("capset: %s loaded but D3D12CreateDevice not found", path);
+   dlclose(handle);
+   return has_entry;
+#else
+   return false;
+#endif
+}
+
 size_t
 npt_get_capset(void *capset, UNUSED uint32_t flags)
 {
    struct virgl_renderer_capset_neptune *c = capset;
    if (c) {
+      /* Probe once; the answer can't change while the process lives. */
+      static int d3d12_state; /* 0 = unprobed, 1 = no, 2 = yes */
+      if (!d3d12_state)
+         d3d12_state = npt_capset_probe_d3d12() ? 2 : 1;
+
       memset(c, 0, sizeof(*c));
       c->wire_format_version = NPT_PROTOCOL_WIRE_VERSION;
+      if (d3d12_state == 2)
+         c->caps_flags |= VIRGL_RENDERER_CAPSET_NEPTUNE_CAP_D3D12;
    }
 
    return sizeof(struct virgl_renderer_capset_neptune);
@@ -148,7 +200,7 @@ npt_renderer_submit_cmd(uint32_t ctx_id, void *cmd, uint32_t size)
 
 bool
 npt_renderer_submit_fence(uint32_t ctx_id,
-                          uint32_t flags,
+                          UNUSED uint32_t flags,
                           uint64_t ring_idx,
                           uint64_t fence_id)
 {
@@ -168,7 +220,7 @@ npt_renderer_submit_fence(uint32_t ctx_id,
       return false;
    }
 
-   return npt_context_submit_fence(ctx, flags, (uint32_t)ring_idx, fence_id);
+   return npt_context_submit_fence(ctx, (uint32_t)ring_idx, fence_id);
 }
 
 bool

@@ -11,32 +11,70 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <poll.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "npt_context.h"
+#include "npt_event.h"
 #include "npt_profile.h"
 #include "util/u_thread.h"
+#include "virgl_fence.h"
+
+/* The host D3D library gives the sync path no DEVICE_LOST signal -- only
+ * an fd, and for gates a fence value -- so a wall-clock budget is the
+ * only way to stop a wedged producer from trapping the guest forever.
+ * It has to be wall clock rather than a count of poll returns: the
+ * ring's gate event is shared by all of that ring's gates, so another
+ * gate's fire wakes this poll arbitrarily often without any time
+ * passing.  Healthy work finishes orders of magnitude inside it. */
+#define NPT_QUEUE_DEVICE_LOST_SEC 30u
 
 /* ----------------------------------------------------------------- */
 /* sync alloc / free / retire                                          */
 /* ----------------------------------------------------------------- */
 
+/* Take every queued wakeup off the fd.  The event is level-triggered and
+ * shared across the ring's gates, so a token left behind would wake the
+ * next gate on a fire that was never meant for it.  The wait fd is
+ * non-blocking (npt_event.c), so the loop ends on EAGAIN.  Returns
+ * whether anything was actually there: a poll that reports readable and
+ * then yields nothing is a dead fd (POLLERR/POLLHUP), not a fire. */
+static bool
+npt_queue_drain_wakeups(int fd)
+{
+   if (fd < 0)
+      return false;
+
+   bool drained = false;
+   uint64_t token;
+   ssize_t n;
+   do {
+      n = read(fd, &token, sizeof(token));
+      drained |= n > 0;
+   } while (n > 0 || (n < 0 && errno == EINTR));
+
+   return drained;
+}
+
 static struct npt_queue_sync *
-npt_queue_alloc_sync(uint32_t flags,
-                     uint32_t ring_idx,
+npt_queue_alloc_sync(uint32_t ring_idx,
                      uint64_t fence_id,
-                     int sync_fd)
+                     const struct npt_event_paired *paired)
 {
    struct npt_queue_sync *sync = malloc(sizeof(*sync));
    if (!sync)
       return NULL;
 
-   sync->sync_fd  = sync_fd;
-   sync->flags    = flags;
+   sync->sync_fd  = paired->fd;
    sync->ring_idx = ring_idx;
    sync->fence_id = fence_id;
-   sync->timeouts = 0;
+   sync->release_token = paired->release_token;
+   sync->check_fence = paired->check_fence;
+   sync->check_value = paired->check_value;
+   sync->fast_poll = false;
+   sync->deadline_ns = npt_profile_now_ns() +
+      (uint64_t)NPT_QUEUE_DEVICE_LOST_SEC * 1000000000ull;
 
    return sync;
 }
@@ -54,6 +92,19 @@ npt_queue_sync_retire(struct npt_queue *queue, struct npt_queue_sync *sync)
 {
    queue->context->retire_fence(queue->context->ctx_id,
                                  sync->ring_idx, sync->fence_id);
+   /* Belt-and-braces against stranded virgl fence-table entries: the
+    * synchronous submit path's take_fd normally empties the table, but
+    * any entry left behind (e.g. a take that lost a race with a very
+    * fast completion) would otherwise be swept with a syscall by every
+    * later virgl_fence_set_fd, forever.  A no-op on the common path. */
+   virgl_fence_retire(virgl_fence_ring_key(sync->ring_idx, sync->fence_id));
+   /* AUTO_RELEASE arm: the proxy reference was transferred to this
+    * entry at pairing; the fence has retired (the proxy fired), so the
+    * D3D library is done writing the signal handle -- release it. */
+   if (sync->release_token)
+      npt_event_release(queue->context, sync->release_token);
+   if (sync->check_fence)
+      npt_d3d12_gate_release(sync->check_fence);
    npt_queue_free_sync(sync);
 }
 
@@ -63,16 +114,19 @@ npt_queue_sync_retire(struct npt_queue *queue, struct npt_queue_sync *sync)
 
 bool
 npt_queue_sync_submit(struct npt_queue *queue,
-                      uint32_t flags,
                       uint32_t ring_idx,
                       uint64_t fence_id,
-                      int sync_fd)
+                      const struct npt_event_paired *paired)
 {
    struct npt_queue_sync *sync =
-      npt_queue_alloc_sync(flags, ring_idx, fence_id, sync_fd);
+      npt_queue_alloc_sync(ring_idx, fence_id, paired);
    if (!sync) {
-      if (sync_fd >= 0)
-         close(sync_fd);
+      if (paired->fd >= 0)
+         close(paired->fd);
+      if (paired->release_token)
+         npt_event_release(queue->context, paired->release_token);
+      if (paired->check_fence)
+         npt_d3d12_gate_release(paired->check_fence);
       return false;
    }
 
@@ -110,6 +164,7 @@ npt_wait_sync_fd(int fd, int timeout_ms)
       return 1;
    if (ret < 0)
       return 1;
+
    return ret;
 }
 
@@ -126,11 +181,15 @@ npt_queue_thread(void *arg)
     * reacquired before popping the entry. */
    const int kPollTimeoutMs = 3000;
 
-   /* Bounded device-lost bailout.  Without a clear DEVICE_LOST
-    * signal (we only have a sync_file fd), consecutive poll
-    * timeouts are the best evidence the producer is wedged.  After
-    * ~30 s, retire so the guest unblocks instead of hanging forever. */
-   const unsigned kMaxTimeouts = 10;
+   /* Value-gated (GATE_WAIT) syncs poll on a short period.  The wakeup
+    * event is shared across the ring's gates, so this gate's fire can be
+    * legally consumed by another gate's drain, leaving the value complete
+    * with the event silent until the next timeout notices.  250 ms bounds
+    * that latency at negligible idle cost, and the common path never
+    * waits it out.  A gate that has already seen such a wake drops to
+    * kGateFastPollMs. */
+   const int kGatePollTimeoutMs = 250;
+   const int kGateFastPollMs = 2;
 
    mtx_lock(&queue->sync_thread.mutex);
    while (true) {
@@ -147,27 +206,66 @@ npt_queue_thread(void *arg)
 
       struct timespec t0, t1;
       const bool trace = NPT_DEBUG(FENCE_TRACE);
-      if (trace)
+      if (trace) {
          clock_gettime(CLOCK_MONOTONIC, &t0);
-      int rc = npt_wait_sync_fd(sync->sync_fd, kPollTimeoutMs);
+         t1 = t0;
+      }
+      int rc = 0;
+
+      if (sync->check_fence) {
+         /* The event is only a wakeup source; the value is the truth.
+          * Check it before waiting, since this gate's fire may already
+          * have been consumed and polling first would then wait out a
+          * full period while the value sits complete. */
+         if (npt_d3d12_gate_reached(sync->check_fence, sync->check_value)) {
+            npt_queue_drain_wakeups(sync->sync_fd);
+            mtx_lock(&queue->sync_thread.mutex);
+            goto retire;
+         }
+
+         rc = npt_wait_sync_fd(sync->sync_fd,
+                               sync->fast_poll ? kGateFastPollMs
+                                               : kGatePollTimeoutMs);
+
+         bool stale = false;
+         if (rc > 0 && npt_queue_drain_wakeups(sync->sync_fd)) {
+            stale = !npt_d3d12_gate_reached(sync->check_fence,
+                                            sync->check_value);
+         }
+
+         mtx_lock(&queue->sync_thread.mutex);
+         if (stale) {
+            /* A fire arrived but the value is not ours: this gate's own
+             * fire may already have been drained by an earlier one and
+             * will never wake us. */
+            sync->fast_poll = true;
+         }
+         if (npt_profile_now_ns() < sync->deadline_ns)
+            continue;
+         npt_log("queue %u fence_id=%" PRIu64 ": gate value %" PRIu64
+                 " not reached in %us, retiring as device-lost",
+                 queue->ring_idx, sync->fence_id, sync->check_value,
+                 NPT_QUEUE_DEVICE_LOST_SEC);
+         goto retire;
+      }
+
+      rc = npt_wait_sync_fd(sync->sync_fd, kPollTimeoutMs);
       if (trace)
          clock_gettime(CLOCK_MONOTONIC, &t1);
 
       mtx_lock(&queue->sync_thread.mutex);
 
       if (rc == 0) {
-         /* Poll timeout: bump the counter, and once it crosses
-          * kMaxTimeouts retire the fence anyway so a wedged host
-          * (driver hang, missing sync_file signal) doesn't trap the
-          * guest forever.  Healthy GPUs never hit more than one or
-          * two timeouts in a row. */
-         if (++sync->timeouts < kMaxTimeouts)
+         /* Poll timeout: keep waiting until the device-lost budget is
+          * spent, then retire anyway so a wedged host (driver hang,
+          * missing sync_file signal) doesn't trap the guest forever. */
+         if (npt_profile_now_ns() < sync->deadline_ns)
             continue;
-         npt_log("queue %u fence_id=%" PRIu64 ": timed out %u times "
-                 "(~%u s), retiring as device-lost",
-                 queue->ring_idx, sync->fence_id, sync->timeouts,
-                 kMaxTimeouts * (kPollTimeoutMs / 1000));
+         npt_log("queue %u fence_id=%" PRIu64 ": no completion in %us, "
+                 "retiring as device-lost", queue->ring_idx, sync->fence_id,
+                 NPT_QUEUE_DEVICE_LOST_SEC);
       }
+retire:;
 
       if (trace) {
          const int64_t dt_ns =

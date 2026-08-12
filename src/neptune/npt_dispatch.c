@@ -14,6 +14,7 @@
 #include "npt_cs.h"
 #include "npt_event.h"
 #include "npt_feedback.h"
+#include "npt_heap12.h"
 #include "npt_resource.h"
 #include "npt_ring.h"
 #include "npt_shared.h"
@@ -209,6 +210,41 @@ npt_dispatch_register_event(struct npt_context *ctx,
 }
 
 static void
+npt_dispatch_gate_wait(struct npt_context *ctx,
+                       struct npt_cs_decoder *dec,
+                       struct npt_cs_encoder *enc,
+                       const struct npt_command_header *header)
+{
+   struct npt_cmd_gate_wait cmd;
+   cmd.header = *header;
+   npt_cs_decoder_read(dec, sizeof(cmd) - sizeof(cmd.header),
+                       &cmd.fence_id, sizeof(cmd) - sizeof(cmd.header));
+   if (npt_cs_decoder_get_fatal(dec))
+      return;
+
+   /* Type-checked rather than IUnknown-permissive (which matches any
+    * registered object): the gate calls this pointer through fixed
+    * ID3D12Fence vtable slots, so any other type would be an
+    * out-of-contract indirect call inside the shared render server. */
+   void *fence = npt_context_lookup_object(ctx, dec, cmd.fence_id,
+                                           NPT_OBJECT_TYPE_ID3D12FENCE);
+   bool ok = fence &&
+      npt_event_gate_wait(ctx, fence, cmd.value, cmd.ring_idx);
+   if (!ok)
+      npt_event_drain_parked_ring(ctx, cmd.ring_idx);
+
+   struct npt_cmd_gate_wait_reply reply = { 0 };
+   reply.header.cmd_type = header->cmd_type;
+   reply.header.cmd_return = ok ? 0u : (uint32_t)(int32_t)NPT_E_FAIL;
+   if (header->cmd_flags & NPT_CMD_FLAG_REPLY) {
+      if (npt_cs_encoder_acquire(enc)) {
+         npt_cs_encoder_write(enc, sizeof(reply), &reply, sizeof(reply));
+         npt_cs_encoder_release(enc);
+      }
+   }
+}
+
+static void
 npt_dispatch_arm_event_fence(struct npt_context *ctx,
                              struct npt_cs_decoder *dec,
                              struct npt_cs_encoder *enc,
@@ -221,7 +257,9 @@ npt_dispatch_arm_event_fence(struct npt_context *ctx,
    if (npt_cs_decoder_get_fatal(dec))
       return;
 
-   bool ok = npt_event_arm(ctx, cmd.event_token, cmd.ring_idx);
+   bool ok = npt_event_arm(ctx, cmd.event_token, cmd.ring_idx, cmd.flags);
+   if (!ok)
+      npt_event_drain_parked_ring(ctx, cmd.ring_idx);
 
    struct npt_cmd_arm_event_fence_reply reply = { 0 };
    reply.header.cmd_type = header->cmd_type;
@@ -589,6 +627,9 @@ npt_dispatch_subgroup_resource(struct npt_context *ctx,
    case NPT_TRANSPORT_RESOURCE_EXECUTE_CMD_STREAM:
       npt_dispatch_execute_command_stream(ctx, dispatch, dec, enc, header);
       return true;
+   case NPT_TRANSPORT_RESOURCE_CREATE_HEAP_FROM_SHMEM:
+      npt_dispatch_create_heap_from_shmem(ctx, dec, enc, header);
+      return true;
    default:
       return false;
    }
@@ -680,6 +721,9 @@ npt_dispatch_subgroup_event(struct npt_context *ctx,
    case NPT_TRANSPORT_EVENT_ARM_FENCE:
       npt_dispatch_arm_event_fence(ctx, dec, enc, header);
       return true;
+   case NPT_TRANSPORT_EVENT_GATE_WAIT:
+      npt_dispatch_gate_wait(ctx, dec, enc, header);
+      return true;
    case NPT_TRANSPORT_EVENT_RELEASE:
       npt_dispatch_release_event(ctx, dec, enc, header);
       return true;
@@ -726,7 +770,8 @@ npt_dispatch_register_fence_feedback(struct npt_context *ctx,
    if (npt_cs_decoder_get_fatal(dec))
       return;
    npt_feedback_fence_register(ctx, header->object_id,
-                               cmd.fb_res_id, cmd.fb_offset);
+                               cmd.fb_res_id, cmd.fb_offset,
+                               cmd.fence_api);
 }
 
 static bool

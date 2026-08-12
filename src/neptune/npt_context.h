@@ -10,6 +10,7 @@
 
 #include "npt_common.h"
 #include "npt_cs.h"
+#include "npt_event.h"
 #include "npt_feedback.h"
 #include "npt_renderer.h"
 #include "neptune-protocol/npt_protocol_host_dispatch_types.h"
@@ -61,6 +62,13 @@ struct npt_resource {
    } u;
 
    size_t size;
+
+   /* Live ID3D12Heap imports aliasing u.data, plus any import in
+    * progress.  While nonzero the mapping must NOT be munmapped: destroy
+    * marks the entry `zombie` instead and the last import released
+    * completes the free.  Both fields are guarded by resource_mutex. */
+   uint32_t heap_import_count;
+   bool zombie;
 };
 
 struct npt_context {
@@ -126,6 +134,12 @@ struct npt_context {
    mtx_t pending_blob_mutex;
    struct hash_table *pending_blob_table;  /* blob_id -> npt_pending_blob */
 
+   /* Shmem-imported D3D12 heaps: heap guest id -> backing SHM
+    * npt_resource, consulted on COM_RELEASE to drop that resource's
+    * import pin. */
+   mtx_t heap_import_mutex;
+   struct hash_table *heap_import_table;
+
    /* Indexed by guest-supplied ring_idx; entry 0 is unused (ring_idx
     * 0 means "retire on CPU timeline").  Lazily populated when the
     * first fence on a given ring_idx arrives.
@@ -140,6 +154,12 @@ struct npt_context {
    mtx_t sync_queues_mutex;
    struct npt_queue *sync_queues[64];
 
+   /* Per-ring gate events for D3D12 monitored-fence gates, kept alive
+    * until context teardown so the host D3D library's asynchronous
+    * completion fires always land on a live object of the right ring.
+    * Guarded by event_mutex. */
+   struct npt_event_fd gate_ring[64];
+
    /* Win32 event HANDLE emulation: each proxy owns an eventfd handed
     * to the host D3D library as the HANDLE.  event_pending_arms
     * carries (ring_idx, dup_fd) triples; the next matching
@@ -147,6 +167,13 @@ struct npt_context {
    mtx_t                 event_mutex;
    struct hash_table    *event_proxies;
    struct list_head      event_pending_arms;
+   /* Fences that arrived before their ARM_EVENT_FENCE was decoded: the
+    * Windows KMD delivers the fence on the virtio control queue while
+    * the ARM sits in the npt event ring, so either can win.  Parked here
+    * under event_mutex and paired when the ARM lands -- retiring on the
+    * miss would complete the guest's wait before the GPU work ran, and
+    * leave the arm to mispair with the ring's next fence. */
+   struct list_head      event_pending_fences;
 
    /* Per-object shmem slots (queries, fences, ...) the dispatch
     * thread writes when host state advances, so the guest reads
@@ -196,9 +223,23 @@ npt_context_dispatch_one_command(struct npt_context *ctx,
  * proxy eventfd via a per-ring npt_queue worker. */
 bool
 npt_context_submit_fence(struct npt_context *ctx,
-                         uint32_t flags,
                          uint32_t ring_idx,
                          uint64_t fence_id);
+
+/* Route a paired (arm wait fd, fence) to the ring's sync queue, taking
+ * ownership of the fd.
+ *
+ * register_fd puts the fd in the virgl fence table for the submit
+ * dispatch's virgl_fence_take_fd, and is true ONLY on the synchronous
+ * submit_fence path.  The parked-pairing paths pass false: their
+ * consumer replied long ago, and a stranded entry is swept with a
+ * syscall by every later virgl_fence_set_fd, forever. */
+struct npt_event_paired;
+bool
+npt_context_pair_event_fence(struct npt_context *ctx,
+                             uint32_t ring_idx, uint64_t fence_id,
+                             const struct npt_event_paired *paired,
+                             bool register_fd);
 
 bool
 npt_context_create_resource(struct npt_context *ctx,
@@ -217,6 +258,11 @@ npt_context_import_resource(struct npt_context *ctx,
 
 void
 npt_context_destroy_resource(struct npt_context *ctx, uint32_t res_id);
+
+/* Free a resource already detached from resource_table, completing a
+ * munmap that was deferred while it was pinned. */
+void
+npt_context_free_detached_resource(struct npt_resource *res);
 
 static inline struct npt_resource *
 npt_context_get_resource(struct npt_context *ctx, uint32_t res_id)

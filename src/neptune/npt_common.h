@@ -76,6 +76,13 @@ extern uint32_t npt_profile_period_ms;
 void
 npt_debug_init(void);
 
+/* Capset answers a split deployment has to supply by hand, since the
+ * process filling the capset cannot observe the render server's backend.
+ * Negative when unset: NPT_CAPSET_D3D12 is a 0/1 standing in for the
+ * D3D12 probe. */
+long
+npt_capset_d3d12_override(void);
+
 void
 npt_log(const char *fmt, ...);
 

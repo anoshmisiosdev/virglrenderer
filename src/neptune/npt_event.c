@@ -4,9 +4,11 @@
  */
 
 #include "npt_event.h"
+
 #include "npt_context.h"
 #include "npt_library.h"
 #include "npt_renderer.h"
+#include "npt_transport_defs.h"
 
 #include "util/hash_table.h"
 #include "util/list.h"
@@ -91,8 +93,8 @@ event_fd_destroy(struct npt_event_fd *fd)
 }
 
 /* The value handed to the host as the HANDLE; SetEvent acts on it.
- * An fd cast to a pointer on eventfd/pipe platforms, the d3dmetal-
- * native event handle on darwin. */
+ * An fd cast to a pointer on eventfd/pipe platforms, the backend's
+ * event handle on darwin. */
 static void *
 event_fd_signal_handle(const struct npt_event_fd *fd)
 {
@@ -105,19 +107,34 @@ event_fd_signal_handle(const struct npt_event_fd *fd)
 #endif
 }
 
-/* Caller polls + closes the returned dup. */
+/* Caller polls + closes the returned dup.
+ *
+ * Always non-blocking: a ring's gate event is shared by every gate on
+ * it, so the sync worker cannot know how many wakeups are queued and
+ * has to drain with a read loop that ends on EAGAIN.  A blocking fd
+ * would park that worker in read() with the whole queue behind it. */
 static int
 event_fd_dup_wait_fd(const struct npt_event_fd *fd)
 {
 #if defined(__linux__)
-   return dup(fd->fd);
+   int wait_fd = dup(fd->fd);
 #elif defined(__APPLE__)
    struct npt_d3d_library *lib = npt_renderer_get_library();
-   return (lib && lib->pfn_event_dup_fd) ? lib->pfn_event_dup_fd(fd->handle)
-                                         : -1;
+   int wait_fd = (lib && lib->pfn_event_dup_fd)
+                    ? lib->pfn_event_dup_fd(fd->handle) : -1;
 #else
-   return dup(fd->read_fd);
+   int wait_fd = dup(fd->read_fd);
 #endif
+   if (wait_fd < 0)
+      return -1;
+
+   const int flags = fcntl(wait_fd, F_GETFL);
+   if (flags < 0 || fcntl(wait_fd, F_SETFL, flags | O_NONBLOCK) < 0) {
+      npt_log("event: O_NONBLOCK on the wait fd failed: %s", strerror(errno));
+      close(wait_fd);
+      return -1;
+   }
+   return wait_fd;
 }
 
 static void
@@ -130,6 +147,18 @@ event_fd_init_invalid(struct npt_event_fd *fd)
 #else
    fd->read_fd = -1;
    fd->write_fd = -1;
+#endif
+}
+
+static bool
+event_fd_is_valid(const struct npt_event_fd *fd)
+{
+#if defined(__linux__)
+   return fd->fd >= 0;
+#elif defined(__APPLE__)
+   return fd->handle != NULL;
+#else
+   return fd->read_fd >= 0;
 #endif
 }
 
@@ -162,6 +191,9 @@ npt_event_init(struct npt_context *ctx)
    }
 
    list_inithead(&ctx->event_pending_arms);
+   list_inithead(&ctx->event_pending_fences);
+   for (unsigned i = 0; i < ARRAY_SIZE(ctx->gate_ring); i++)
+      event_fd_init_invalid(&ctx->gate_ring[i]);
    return true;
 }
 
@@ -180,12 +212,33 @@ npt_event_fini(struct npt_context *ctx)
    if (leaked)
       npt_log("event_fini: %u proxies leaked at context teardown", leaked);
 
+   /* There is no way to retract a SetEventOnCompletion, so a gate event
+    * must not be destroyed while a registration on it can still fire:
+    * the later signal would hit a recycled fd number, or on darwin a
+    * freed handle.  An unpaired gate arm whose value is demonstrably not
+    * reached is exactly that case, so it pins its ring's event for the
+    * life of the process.  Only a guest that dies mid-gate gets here,
+    * and at most one event per ring index is ever pinned. */
+   bool gate_pinned[ARRAY_SIZE(ctx->gate_ring)] = { false };
+
    list_for_each_entry_safe(struct npt_event_pending_arm, p,
                             &ctx->event_pending_arms, head) {
+      if (p->check_fence) {
+         if (p->ring_idx < ARRAY_SIZE(gate_pinned) &&
+             !npt_d3d12_gate_reached(p->check_fence, p->check_value))
+            gate_pinned[p->ring_idx] = true;
+         npt_d3d12_gate_release(p->check_fence);
+      }
       if (p->dup_fd >= 0)
          close(p->dup_fd);
       list_del(&p->head);
       free(p);
+   }
+
+   list_for_each_entry_safe(struct npt_event_pending_fence, f,
+                            &ctx->event_pending_fences, head) {
+      list_del(&f->head);
+      free(f);
    }
 
    hash_table_foreach(ctx->event_proxies, entry) {
@@ -195,6 +248,17 @@ npt_event_fini(struct npt_context *ctx)
    }
    _mesa_hash_table_destroy(ctx->event_proxies, NULL);
    ctx->event_proxies = NULL;
+
+   for (unsigned i = 0; i < ARRAY_SIZE(ctx->gate_ring); i++) {
+      if (!event_fd_is_valid(&ctx->gate_ring[i]))
+         continue;
+      if (gate_pinned[i])
+         npt_log("event_fini: ring %u gate event kept open; a fence "
+                 "registration on it can still fire", i);
+      else
+         event_fd_destroy(&ctx->gate_ring[i]);
+      event_fd_init_invalid(&ctx->gate_ring[i]);
+   }
 
    mtx_unlock(&ctx->event_mutex);
    mtx_destroy(&ctx->event_mutex);
@@ -220,9 +284,9 @@ npt_event_proxy_unref_locked(struct npt_context *ctx,
  * its REGISTER_EVENT travel on different host channels (a per-event ring vs
  * the renderer command stream) and can be decoded out of order.  If ARM lands
  * first and took a registration reference too, the later REGISTER_EVENT would
- * add a second one that the guest's single RELEASE_EVENT never balances —
- * leaking the proxy's kqueue+pipe fds.  With 0 here, REGISTER always
- * contributes exactly one registration reference regardless of arrival order. */
+ * add a second one that the guest's single RELEASE_EVENT never balances,
+ * leaking the proxy.  With 0 here, REGISTER always contributes exactly one
+ * registration reference regardless of arrival order. */
 static struct npt_event_proxy *
 event_proxy_create_locked(struct npt_context *ctx, uint64_t token,
                           uint32_t initial_refcount)
@@ -266,17 +330,55 @@ npt_event_register(struct npt_context *ctx, uint64_t token)
    mtx_unlock(&ctx->event_mutex);
 }
 
+/* Caller holds event_mutex.  Unlinks the fence parked on ring_idx and
+ * transfers it to the caller. */
+static struct npt_event_pending_fence *
+event_take_parked_locked(struct npt_context *ctx, uint32_t ring_idx)
+{
+   list_for_each_entry(struct npt_event_pending_fence, f,
+                       &ctx->event_pending_fences, head) {
+      if (f->ring_idx == ring_idx) {
+         list_del(&f->head);
+         return f;
+      }
+   }
+   return NULL;
+}
+
+/* Hand a parked fence to the sync queue and free it.  Caller must have
+ * dropped event_mutex: pairing reaches back into the renderer. */
+static void
+event_pair_parked(struct npt_context *ctx,
+                  struct npt_event_pending_fence *parked,
+                  const struct npt_event_paired *paired)
+{
+   const uint32_t ring_idx = parked->ring_idx;
+   const uint64_t fence_id = parked->fence_id;
+   free(parked);
+
+   if (!npt_context_pair_event_fence(ctx, ring_idx, fence_id, paired,
+                                     /*register_fd=*/false))
+      npt_log("event: pairing parked fence (ring=%u id=%" PRIu64 ") failed",
+              ring_idx, fence_id);
+}
+
 bool
-npt_event_arm(struct npt_context *ctx, uint64_t token, uint32_t ring_idx)
+npt_event_arm(struct npt_context *ctx, uint64_t token, uint32_t ring_idx,
+              uint32_t arm_flags)
 {
    if (!token)
       return false;
+
+   const bool auto_release = (arm_flags & NPT_EVENT_ARM_FLAG_AUTO_RELEASE) != 0;
 
    mtx_lock(&ctx->event_mutex);
    struct npt_event_proxy *pr = lookup_locked(ctx, token);
    if (!pr) {
       /* Lazy-create for an ARM that beat its REGISTER_EVENT, WITHOUT a
-       * registration reference — the arm reference taken below holds it. */
+       * registration reference — the arm reference taken below holds it.
+       * AUTO_RELEASE arms never send REGISTER at all, so for them this
+       * is the only creation path and the arm reference is the proxy's
+       * single reference. */
       pr = event_proxy_create_locked(ctx, token, /*initial_refcount=*/0);
       if (!pr) {
          mtx_unlock(&ctx->event_mutex);
@@ -296,6 +398,27 @@ npt_event_arm(struct npt_context *ctx, uint64_t token, uint32_t ring_idx)
       return false;
    }
 
+   /* A fence for this ring may already be parked, having outrun this ARM
+    * on the independent virtio channel.  Consume the arm here exactly as
+    * a pop would. */
+   struct npt_event_pending_fence *parked =
+      event_take_parked_locked(ctx, ring_idx);
+   if (parked) {
+      /* AUTO_RELEASE: transfer the arm reference to the sync-queue entry
+       * instead of unreffing, so the signal handle the D3D library stored
+       * stays valid until it has been written. */
+      if (!auto_release)
+         npt_event_proxy_unref_locked(ctx, pr, NULL);
+      mtx_unlock(&ctx->event_mutex);
+
+      const struct npt_event_paired paired = {
+         .fd = dup_fd,
+         .release_token = auto_release ? token : 0,
+      };
+      event_pair_parked(ctx, parked, &paired);
+      return true;
+   }
+
    struct npt_event_pending_arm *p = calloc(1, sizeof(*p));
    if (!p) {
       close(dup_fd);
@@ -306,6 +429,8 @@ npt_event_arm(struct npt_context *ctx, uint64_t token, uint32_t ring_idx)
    p->ring_idx = ring_idx;
    p->dup_fd   = dup_fd;
    p->proxy    = pr;
+   p->auto_release = auto_release;
+   p->token    = token;
    list_addtail(&p->head, &ctx->event_pending_arms);
 
    mtx_unlock(&ctx->event_mutex);
@@ -334,6 +459,76 @@ npt_event_proxy_unref_locked(struct npt_context *ctx,
    free(pr);
 }
 
+/* GATE_WAIT: D3D12 monitored-fence gate arm with value-checked
+ * retirement (see npt_cmd_gate_wait). */
+bool
+npt_event_gate_wait(struct npt_context *ctx, void *fence, uint64_t value,
+                    uint32_t ring_idx)
+{
+   if (!fence || ring_idx >= ARRAY_SIZE(ctx->gate_ring))
+      return false;
+
+   mtx_lock(&ctx->event_mutex);
+   struct npt_event_fd *gate = &ctx->gate_ring[ring_idx];
+   if (!event_fd_is_valid(gate) && event_fd_create(gate) < 0) {
+      event_fd_init_invalid(gate);
+      mtx_unlock(&ctx->event_mutex);
+      npt_log("gate_wait: gate event create failed: %s", strerror(errno));
+      return false;
+   }
+
+   int dup_fd = event_fd_dup_wait_fd(gate);
+   if (dup_fd < 0) {
+      mtx_unlock(&ctx->event_mutex);
+      npt_log("gate_wait: dup(gate wait fd) failed: %s", strerror(errno));
+      return false;
+   }
+
+   /* Register the wakeup with the D3D library BEFORE any pairing so an
+    * instant fire is observable on the first poll.  The library only
+    * borrows the signal handle, which the per-ring gate keeps alive. */
+   npt_d3d12_gate_addref(fence);
+   if (!npt_d3d12_gate_seoc(fence, value, event_fd_signal_handle(gate))) {
+      npt_d3d12_gate_release(fence);
+      close(dup_fd);
+      mtx_unlock(&ctx->event_mutex);
+      npt_log("gate_wait: SetEventOnCompletion failed (v=%" PRIu64 ")",
+              value);
+      return false;
+   }
+
+   struct npt_event_pending_fence *parked =
+      event_take_parked_locked(ctx, ring_idx);
+   if (parked) {
+      mtx_unlock(&ctx->event_mutex);
+
+      const struct npt_event_paired paired = {
+         .fd = dup_fd,
+         .check_fence = fence,
+         .check_value = value,
+      };
+      event_pair_parked(ctx, parked, &paired);
+      return true;
+   }
+
+   struct npt_event_pending_arm *p = calloc(1, sizeof(*p));
+   if (!p) {
+      npt_d3d12_gate_release(fence);
+      close(dup_fd);
+      mtx_unlock(&ctx->event_mutex);
+      return false;
+   }
+   p->ring_idx = ring_idx;
+   p->dup_fd = dup_fd;
+   p->proxy = NULL;
+   p->check_fence = fence;
+   p->check_value = value;
+   list_addtail(&p->head, &ctx->event_pending_arms);
+
+   mtx_unlock(&ctx->event_mutex);
+   return true;
+}
+
 void
 npt_event_release(struct npt_context *ctx, uint64_t token)
 {
@@ -353,33 +548,99 @@ npt_event_release(struct npt_context *ctx, uint64_t token)
 }
 
 int
-npt_event_pop_pending_arm(struct npt_context *ctx,
-                           uint32_t ring_idx, uint64_t fence_id)
+npt_event_pop_arm_or_park_fence(struct npt_context *ctx, uint32_t ring_idx,
+                                uint64_t fence_id,
+                                struct npt_event_paired *out)
 {
-   /* Match on ring_idx only.  fence_id is virgl-allocated when the
-    * matching command submission arrives — strictly after the guest
-    * sent ARM_EVENT_FENCE — so the guest can't include it.  Per-ring
-    * FIFO pairing works because the guest serialises ARM and submit
-    * on one ring. */
-   (void)fence_id;
+   /* Atomic pop-or-park under event_mutex: either the ARM is already
+    * decoded (return its proxy fd) or the fence parks until the ARM
+    * lands (npt_event_arm pairs it).  The fence and the ARM travel on
+    * independent channels on the Windows path (virtio ctrl queue vs
+    * npt event ring), so either order is legal. */
    int fd = -1;
+   memset(out, 0, sizeof(*out));
+   out->fd = -1;
    mtx_lock(&ctx->event_mutex);
    list_for_each_entry_safe(struct npt_event_pending_arm, p,
                             &ctx->event_pending_arms, head) {
       if (p->ring_idx == ring_idx) {
          fd = p->dup_fd;
+         out->fd = fd;
+         out->check_fence = p->check_fence;
+         out->check_value = p->check_value;
          list_del(&p->head);
-         /* dup_fd survives the proxy free: the read end remains
-          * pollable; writes to the closed write end stop, with the
-          * sync queue's poll timeout as fallback. */
-         if (p->proxy)
-            npt_event_proxy_unref_locked(ctx, p->proxy, NULL);
+         if (p->proxy) {
+            /* AUTO_RELEASE: transfer the arm reference to the caller's
+             * sync-queue entry (released after retirement, post-fire). */
+            if (p->auto_release)
+               out->release_token = p->token;
+            else
+               npt_event_proxy_unref_locked(ctx, p->proxy, NULL);
+         }
          free(p);
          break;
       }
    }
+   if (fd < 0) {
+      struct npt_event_pending_fence *f = calloc(1, sizeof(*f));
+      if (!f) {
+         mtx_unlock(&ctx->event_mutex);
+         return NPT_EVENT_FENCE_ERR;
+      }
+      f->ring_idx = ring_idx;
+      f->fence_id = fence_id;
+      list_addtail(&f->head, &ctx->event_pending_fences);
+      static int parked_logged;
+      if (parked_logged < 8) {
+         parked_logged++;
+         npt_log("event: fence (ring=%u id=%" PRIu64 ") outran its ARM; "
+                 "parked until the ARM decodes", ring_idx, fence_id);
+      }
+      mtx_unlock(&ctx->event_mutex);
+      return NPT_EVENT_FENCE_PARKED;
+   }
    mtx_unlock(&ctx->event_mutex);
    return fd;
+}
+
+/* Retire every parked fence matching `ring_idx`, or all of them when
+ * `all`.  Collected under the mutex and retired after it is dropped:
+ * retire_fence reaches back into the renderer and must not run with an
+ * npt lock held. */
+static void
+npt_event_drain_parked(struct npt_context *ctx, uint32_t ring_idx, bool all)
+{
+   struct list_head doomed;
+   list_inithead(&doomed);
+
+   mtx_lock(&ctx->event_mutex);
+   list_for_each_entry_safe(struct npt_event_pending_fence, f,
+                            &ctx->event_pending_fences, head) {
+      if (all || f->ring_idx == ring_idx) {
+         list_del(&f->head);
+         list_addtail(&f->head, &doomed);
+      }
+   }
+   mtx_unlock(&ctx->event_mutex);
+
+   list_for_each_entry_safe(struct npt_event_pending_fence, f, &doomed,
+                            head) {
+      ctx->retire_fence(ctx->ctx_id, f->ring_idx, f->fence_id);
+      list_del(&f->head);
+      free(f);
+   }
+}
+
+void
+npt_event_drain_parked_fences(struct npt_context *ctx)
+{
+   npt_event_drain_parked(ctx, 0, /*all=*/true);
+}
+
+void
+npt_event_drain_parked_ring(struct npt_context *ctx, uint32_t ring_idx)
+{
+   npt_event_drain_parked(ctx, ring_idx, /*all=*/false);
 }
 
 void *

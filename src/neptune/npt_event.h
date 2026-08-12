@@ -2,10 +2,10 @@
  * Copyright 2026 Turing Software LLC
  * SPDX-License-Identifier: MIT
  *
- * Win32 event-HANDLE emulation.  An eventfd proxy is handed to the
- * host D3D library as the HANDLE.  When SetEvent fires on the proxy,
- * POLLIN signals on the fd and the sync-queue worker drives
- * retire_fence on the matching ARM_EVENT_FENCE arm.
+ * Win32 event-HANDLE emulation.  A proxy event is handed to the host
+ * D3D library as the HANDLE; when the library signals it, the pollable
+ * side wakes the sync-queue worker, which retires the fence the
+ * matching ARM_EVENT_FENCE named.
  */
 
 #ifndef NPT_EVENT_H
@@ -45,7 +45,35 @@ struct npt_event_pending_arm {
    int      dup_fd;         /* pop transfers ownership to the sync queue */
    /* Keeps a refcount on the proxy until pop transfers dup_fd. */
    struct npt_event_proxy *proxy;
+   /* NPT_EVENT_ARM_FLAG_AUTO_RELEASE: pop transfers the arm's proxy
+    * reference to the sync-queue entry (token below) instead of
+    * unreffing; the sync queue releases it after the fence retires. */
+   bool     auto_release;
+   uint64_t token;
+   /* GATE_WAIT arms: retire only when the fence truly reaches
+    * check_value, re-verified on every wakeup, since the ring's gate
+    * event also carries other gates' fires.  check_fence holds an
+    * IUnknown reference released at retire. */
+   void    *check_fence;
+   uint64_t check_value;
    struct list_head head;
+};
+
+/* What a pop hands to the sync queue. */
+struct npt_event_paired {
+   int      fd;             /* dup'd wait fd; ownership transferred */
+   uint64_t release_token;  /* AUTO_RELEASE arm's transferred proxy ref */
+   void    *check_fence;    /* value-gated retirement (or NULL) */
+   uint64_t check_value;
+};
+
+/* A fence that outran its ARM_EVENT_FENCE (independent channels on the
+ * Windows KMD path); parked in ctx->event_pending_fences until the ARM
+ * decodes and pairs it. */
+struct npt_event_pending_fence {
+   struct list_head head;
+   uint32_t ring_idx;
+   uint64_t fence_id;
 };
 
 bool npt_event_init(struct npt_context *ctx);
@@ -54,15 +82,47 @@ void npt_event_fini(struct npt_context *ctx);
 /* Idempotent: re-register just bumps the refcount. */
 void npt_event_register(struct npt_context *ctx, uint64_t token);
 
-/* False if token isn't registered or dup/alloc fails. */
+/* False if token isn't registered or dup/alloc fails.  arm_flags is
+ * NPT_EVENT_ARM_FLAG_* from the wire. */
 bool npt_event_arm(struct npt_context *ctx, uint64_t token,
-                    uint32_t ring_idx);
+                    uint32_t ring_idx, uint32_t arm_flags);
 
 void npt_event_release(struct npt_context *ctx, uint64_t token);
 
-/* Returns the duped proxy fd (ownership transferred) or -1 on miss. */
-int npt_event_pop_pending_arm(struct npt_context *ctx,
-                               uint32_t ring_idx, uint64_t fence_id);
+/* Atomic pop-or-park for event-ring fences: returns the duped proxy fd
+ * (>= 0, ownership transferred), NPT_EVENT_FENCE_PARKED when the fence
+ * outran its ARM and was parked (npt_event_arm will pair and route it),
+ * or NPT_EVENT_FENCE_ERR on allocation failure.  *release_token is set
+ * to the arm's token when the arm carried AUTO_RELEASE (the caller must
+ * npt_event_release it after the fence retires), 0 otherwise. */
+#define NPT_EVENT_FENCE_PARKED (-2)
+#define NPT_EVENT_FENCE_ERR    (-1)
+int npt_event_pop_arm_or_park_fence(struct npt_context *ctx,
+                                    uint32_t ring_idx, uint64_t fence_id,
+                                    struct npt_event_paired *out);
+
+/* GATE_WAIT (D3D12 monitored-fence gates): arm SetEventOnCompletion
+ * (fence, value) onto ring_idx's gate event and install a value-gated
+ * pending arm.  Takes an IUnknown reference on fence for the sync
+ * entry. */
+bool npt_event_gate_wait(struct npt_context *ctx, void *fence,
+                         uint64_t value, uint32_t ring_idx);
+
+/* D3D12 bridge for GATE_WAIT, so npt_event and npt_queue stay free of
+ * D3D COM types. */
+void npt_d3d12_gate_addref(void *fence);
+void npt_d3d12_gate_release(void *fence);
+bool npt_d3d12_gate_seoc(void *fence, uint64_t value, void *signal_handle);
+bool npt_d3d12_gate_reached(void *fence, uint64_t value);
+
+/* Context teardown: retire anything still parked. */
+void npt_event_drain_parked_fences(struct npt_context *ctx);
+
+/* Release the fences parked on one ring.  Every path that fails to
+ * install an arm owes this call: a parked fence has no sync-queue entry,
+ * so nothing else -- not even the device-lost budget -- can ever free
+ * the guest's wait on it. */
+void npt_event_drain_parked_ring(struct npt_context *ctx, uint32_t ring_idx);
 
 /* Returns the signal-end fd (cast to void *) or NULL on miss. */
 void *npt_event_lookup(struct npt_context *ctx, uint64_t token);

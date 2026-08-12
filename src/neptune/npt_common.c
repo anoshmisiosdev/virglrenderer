@@ -22,6 +22,21 @@ DEBUG_GET_ONCE_FLAGS_OPTION(npt_debug_flags, "NPT_DEBUG", npt_debug_options, 0)
 DEBUG_GET_ONCE_NUM_OPTION(npt_profile_period_ms_raw,
                           "NPT_PROFILE_PERIOD_MS", 1000)
 
+/* Capset overrides.  The capset is filled in the process hosting the
+ * virtio device, which need not share an environment -- or an
+ * architecture -- with the render server that will load the backend, so
+ * a deployment that splits the two has to be able to state the answers
+ * outright.  Each returns a negative value when unset.
+ *
+ * Read on every call rather than cached like the options above: the
+ * capset is reported without npt_debug_init having run, and there is no
+ * point in the process where the answers are known to be settled. */
+long
+npt_capset_d3d12_override(void)
+{
+   return debug_get_num_option("NPT_CAPSET_D3D12", -1);
+}
+
 void
 npt_debug_init(void)
 {

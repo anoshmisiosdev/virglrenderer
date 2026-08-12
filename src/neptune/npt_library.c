@@ -8,32 +8,15 @@
 
 #include "npt_library.h"
 
+#include <stdio.h>
+
 #ifdef HAVE_DLFCN_H
 #include <dlfcn.h>
 #endif
 #include <stdio.h>
 
-/* Defaults; override via NPT_*_LIBRARY_PATH env vars.
- *
- * On darwin the D3D entry points and the embedder event API both live in
- * one backend umbrella, dlopened (never linked) and dlsym'd at runtime:
- * libd3dmetal-native (Apple D3DMetal, x86_64/Rosetta) on the x86_64 slice,
- * libdxmt-native (native D3D11-on-Metal) on the arm64 slice.  All three
- * D3D slots resolve to that one image.  DXMT has no D3D12 entry point; that
- * slot's dlsym fails and the D3D12 overrides degrade to E_FAIL by design. */
-#if defined(__APPLE__) && defined(__aarch64__)
-#define NPT_D3D11_LIBRARY_DEFAULT "libdxmt-native.dylib"
-#define NPT_DXGI_LIBRARY_DEFAULT  "libdxmt-native.dylib"
-#define NPT_D3D12_LIBRARY_DEFAULT "libdxmt-native.dylib"
-#elif defined(__APPLE__)
-#define NPT_D3D11_LIBRARY_DEFAULT "libd3dmetal-native.dylib"
-#define NPT_DXGI_LIBRARY_DEFAULT  "libd3dmetal-native.dylib"
-#define NPT_D3D12_LIBRARY_DEFAULT "libd3dmetal-native.dylib"
-#else
-#define NPT_D3D11_LIBRARY_DEFAULT "libd3d11.so"
-#define NPT_DXGI_LIBRARY_DEFAULT  "libdxgi.so"
-#define NPT_D3D12_LIBRARY_DEFAULT "libvkd3d-proton-d3d12.so"
-#endif
+/* Env-var names and library-name defaults live in npt_library_names.h
+ * (shared with the npt_renderer.c D3D12 capset probe). */
 
 #ifdef HAVE_DLFCN_H
 
@@ -71,12 +54,12 @@ npt_library_sym(void *handle, const char *name)
 }
 
 #ifdef __APPLE__
-/* Bind the backend's embedder event API from the loaded umbrella.
- * d3dmetal exports dmn_event_*, dxmt exports dxmt_event_*; probe create()
- * for each prefix to identify the backend, then bind the trio npt_event.c
- * uses.  Also records lib->backend for the workaround-flags gate below. */
+/* Bind the backend's embedder API from the loaded umbrella.  d3dmetal
+ * prefixes its exports dmn_, dxmt prefixes them dxmt_; probing
+ * event_create() for each identifies the backend, which the
+ * workaround-flags gate below also needs. */
 static void
-npt_library_load_event_api(struct npt_d3d_library *lib)
+npt_library_load_embedder_api(struct npt_d3d_library *lib)
 {
    void *mod = lib->d3d11_module ? lib->d3d11_module
              : lib->dxgi_module  ? lib->dxgi_module
@@ -93,7 +76,7 @@ npt_library_load_event_api(struct npt_d3d_library *lib)
    };
 
    for (size_t i = 0; i < ARRAY_SIZE(candidates); i++) {
-      char name[32];
+      char name[64];
       snprintf(name, sizeof(name), "%sevent_create", candidates[i].prefix);
       dlerror();
 #pragma GCC diagnostic push
@@ -116,9 +99,18 @@ npt_library_load_event_api(struct npt_d3d_library *lib)
       lib->pfn_event_dup_fd =
          ((union { void *p; int (*f)(void *); }){
             .p = npt_library_sym(mod, name) }).f;
+
+      /* Optional, as on the Linux side.  DXMT has no D3D12 at all, so
+       * it exports nothing here. */
+      snprintf(name, sizeof(name), "%sopen_existing_heap_from_fd",
+               candidates[i].prefix);
+      lib->pfn_darwin_open_existing_heap_from_fd =
+         ((union { void *p;
+                   PFN_npt_lib_darwin_open_existing_heap_from_fd f; }){
+            .p = npt_library_sym(mod, name) }).f;
       return;
    }
-   npt_log("backend event API (dmn_/dxmt_event_*) not found");
+   npt_log("backend embedder API (dmn_/dxmt_event_*) not found");
 }
 #endif /* __APPLE__ */
 
@@ -171,6 +163,29 @@ npt_library_init(struct npt_d3d_library *lib)
       }
    }
 
+   /* Persistently-mapped UPLOAD/READBACK heaps hand the guest's SHM
+    * pages straight to the app, so vkd3d falling back to a private
+    * allocation on a failed host import would silently make the GPU read
+    * pages the guest never writes.  require_host_import turns that into a
+    * loud failure the guest answers by degrading to its sync-copy path.
+    * Must be set before the module loads: the config parses once. */
+   {
+      const char *cfg = getenv("VKD3D_CONFIG");
+      if (!cfg || !strstr(cfg, "require_host_import")) {
+         if (cfg && cfg[0]) {
+            char merged[1024];
+            int n = snprintf(merged, sizeof(merged),
+                             "%s,require_host_import", cfg);
+            if (n > 0 && (size_t)n < sizeof(merged))
+               setenv("VKD3D_CONFIG", merged, 1);
+            else
+               npt_log("VKD3D_CONFIG too long; require_host_import NOT added");
+         } else {
+            setenv("VKD3D_CONFIG", "require_host_import", 1);
+         }
+      }
+   }
+
    lib->d3d12_module = npt_library_open("NPT_D3D12_LIBRARY_PATH",
                                          NPT_D3D12_LIBRARY_DEFAULT);
    if (lib->d3d12_module) {
@@ -182,6 +197,27 @@ npt_library_init(struct npt_d3d_library *lib)
          npt_log("D3D12 library loaded but D3D12CreateDevice not found");
          dlclose(lib->d3d12_module);
          lib->d3d12_module = NULL;
+      } else {
+         /* Optional; the toplevel overrides fail cleanly when absent. */
+         lib->pfn_D3D12SerializeRootSignature =
+            ((union { void *p; PFN_npt_lib_D3D12SerializeRootSignature f; }){
+               .p = npt_library_sym(lib->d3d12_module,
+                                    "D3D12SerializeRootSignature")
+            }).f;
+         lib->pfn_D3D12SerializeVersionedRootSignature =
+            ((union { void *p;
+                      PFN_npt_lib_D3D12SerializeVersionedRootSignature f; }){
+               .p = npt_library_sym(lib->d3d12_module,
+                                    "D3D12SerializeVersionedRootSignature")
+            }).f;
+         /* Optional: NULL makes CREATE_HEAP_FROM_SHMEM fail cleanly and
+          * the guest stays on the sync-map path. */
+         lib->pfn_vkd3d_open_existing_heap_from_dmabuf =
+            ((union { void *p;
+                      PFN_npt_lib_vkd3d_open_existing_heap_from_dmabuf f; }){
+               .p = npt_library_sym(lib->d3d12_module,
+                                    "vkd3d_open_existing_heap_from_dmabuf")
+            }).f;
       }
    }
 
@@ -199,7 +235,7 @@ npt_library_init(struct npt_d3d_library *lib)
    }
 
 #ifdef __APPLE__
-   npt_library_load_event_api(lib);
+   npt_library_load_embedder_api(lib);
 
    /* D3DMetal's DXBC->AIR/DXIL shader converter has several defects the guest
     * driver (Triton) patches around. Advertise exactly those patches -- each a

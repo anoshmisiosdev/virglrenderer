@@ -186,10 +186,11 @@ struct npt_cmd_com_query_interface_reply {
 /* RESOURCE                                                               */
 /* ====================================================================== */
 
-#define NPT_TRANSPORT_RESOURCE_UPDATE             0u
-#define NPT_TRANSPORT_RESOURCE_MAP                1u
-#define NPT_TRANSPORT_RESOURCE_UNMAP              2u
-#define NPT_TRANSPORT_RESOURCE_EXECUTE_CMD_STREAM 3u
+#define NPT_TRANSPORT_RESOURCE_UPDATE                0u
+#define NPT_TRANSPORT_RESOURCE_MAP                   1u
+#define NPT_TRANSPORT_RESOURCE_UNMAP                 2u
+#define NPT_TRANSPORT_RESOURCE_EXECUTE_CMD_STREAM    3u
+#define NPT_TRANSPORT_RESOURCE_CREATE_HEAP_FROM_SHMEM 4u
 
 /* UpdateSubresource(1) wire path; also serves D3D11_SUBRESOURCE_DATA
  * pSysMem.  D3D12 WriteToSubresource has identical shape (same box
@@ -235,6 +236,11 @@ struct npt_cmd_resource_update {
  * D3D11: context_id = ID3D11DeviceContext*, resource_id = ID3D11Resource*.
  * D3D12: context_id = 0, resource_id = ID3D12Resource*; read_range
  *        carries the D3D12_RANGE (0,0 = full resource). */
+/* D3D12 range encoding: (begin == end == NPT_MAP_RANGE_NULL) means a
+ * NULL D3D12_RANGE pointer ("may read / wrote everything"); anything
+ * else is a literal {Begin, End} pair ({0,0} = empty range). */
+#define NPT_MAP_RANGE_NULL (~0ull)
+
 struct npt_cmd_map_resource {
    struct npt_command_header header;
    uint64_t context_id;       /* D3D11: ID3D11DeviceContext*; D3D12: 0 */
@@ -306,6 +312,28 @@ struct npt_cmd_execute_command_stream {
    uint32_t offset;
    uint32_t size;
    uint32_t pad;
+};
+
+/* Synchronous.  D3D12 persistently-mapped heap path: import the guest
+ * SHM blob window [shmem_offset, shmem_offset + size) as an ID3D12Heap
+ * registered under mint_heap_id.  shmem_offset must be page-aligned;
+ * size is 64 KiB-aligned by the guest allocator.  heap_type/heap_flags
+ * are the app's original values and informational here -- the guest
+ * answers GetDesc / GetHeapProperties locally.  Reply: cmd_return =
+ * HRESULT. */
+struct npt_cmd_create_heap_from_shmem {
+   struct npt_command_header header;
+   /* header.object_id = guest device id */
+   uint64_t mint_heap_id;
+   uint32_t shmem_res_id;
+   uint32_t shmem_offset;
+   uint64_t size;
+   uint32_t heap_type;    /* D3D12_HEAP_TYPE (app's) */
+   uint32_t heap_flags;   /* D3D12_HEAP_FLAGS (app's) */
+};
+
+struct npt_cmd_create_heap_from_shmem_reply {
+   struct npt_reply_header header; /* header.cmd_return = HRESULT */
 };
 
 /* ====================================================================== */
@@ -399,6 +427,7 @@ struct npt_cmd_shared_open_res_reply {
 #define NPT_TRANSPORT_EVENT_REGISTER  0u
 #define NPT_TRANSPORT_EVENT_ARM_FENCE 1u
 #define NPT_TRANSPORT_EVENT_RELEASE   2u
+#define NPT_TRANSPORT_EVENT_GATE_WAIT 3u
 
 /* Token = (uintptr_t) of the guest-side HANDLE. */
 struct npt_cmd_register_event {
@@ -410,11 +439,20 @@ struct npt_cmd_register_event {
  * should use this token's proxy eventfd as its sync source.  Sync
  * so the guest knows the pending-arm is installed before the
  * matching command submission. */
+/* AUTO_RELEASE: no guest waiter owns this token (monitored-fence gate
+ * arms).  The guest sends no REGISTER/RELEASE; the host transfers the
+ * arm's proxy reference to the sync-queue entry at pairing and releases
+ * it after the fence retires, so the signal handle the D3D library
+ * stored stays valid until it has been written. */
+#define NPT_EVENT_ARM_FLAG_AUTO_RELEASE 0x1u
+
 struct npt_cmd_arm_event_fence {
    struct npt_command_header header;
    uint64_t event_token;
    uint32_t ring_idx;
-   uint32_t pad;
+   /* NPT_EVENT_ARM_FLAG_*.  Occupies what older guests send as zeroed
+    * padding, so no flag may mean anything other than "off". */
+   uint32_t flags;
 };
 
 struct npt_cmd_arm_event_fence_reply {
@@ -424,6 +462,30 @@ struct npt_cmd_arm_event_fence_reply {
 struct npt_cmd_release_event {
    struct npt_command_header header;
    uint64_t event_token;
+};
+
+/* Synchronous: monitored-fence gate wait (D3D12 DDI path).  The host
+ * arms SetEventOnCompletion(fence, value) onto ring_idx's gate event and
+ * installs the pending arm; the next submit_fence on ring_idx retires
+ * only once the fence truly reaches value, re-checked on every wakeup.
+ *
+ * The gate event is per-ring and persistent rather than per-arm because
+ * the host D3D library fires completions asynchronously against a handle
+ * it captured at arm time: a single-use event closed at retirement would
+ * hand its identity to whatever opens next.  The wakeup object has to
+ * outlive any one arm, so correctness comes from the value check and
+ * never from which event fired -- which also makes another gate's fire
+ * landing here harmless. */
+struct npt_cmd_gate_wait {
+   struct npt_command_header header;
+   uint64_t fence_id; /* npt object id of the (drain) fence */
+   uint64_t value;
+   uint32_t ring_idx;
+   uint32_t pad;
+};
+
+struct npt_cmd_gate_wait_reply {
+   struct npt_reply_header header;
 };
 
 /* ====================================================================== */
@@ -484,20 +546,20 @@ struct npt_cmd_query_end {
    uint64_t query_id;
 };
 
-/* D3D11 fence feedback.  Each ID3D11Fence has a 16-byte slot the
- * host writes when the value advances.  Monotonic (D3D11 forbids
- * decreasing Signal): no flag or version — the slot is the latest
- * observed completed value, initial 0 means no Signal yet.
+/* Fence feedback (D3D11 + D3D12).  Each registered fence gets a slot the
+ * host publishes the latest observed completed value into, so the guest
+ * reads it with an acquire load instead of a wire round trip.  The store
+ * is a plain snapshot rather than a monotonic CAS because a D3D12 fence
+ * may legally be rewound; a monotonic reader treats the slot as a lower
+ * bound.  A slot still holding its seeded initial value means no Signal
+ * has been observed yet.
  *
- * Register: guest sends REGISTER_FENCE; host inserts entry and
- *   resolves host_obj lazily on first Signal.
- * Update: DC4::Signal hook marks the entry pending; the idle poll
- *   calls GetCompletedValue and publishes via release store.
- * Read: guest's atomic acquire load is always a lower bound.
- * Unregister: piggybacks on COM_RELEASE; feedback_unregister fires
- *   BEFORE the IUnknown::Release so the poll path never touches a
- *   freed pointer. */
+ * Unregistration piggybacks on COM_RELEASE and runs BEFORE the
+ * IUnknown::Release, so the poll never touches a freed pointer. */
 #define NPT_FENCE_FEEDBACK_SLOT_SIZE  16u
+
+#define NPT_FENCE_FEEDBACK_API_D3D11  11u
+#define NPT_FENCE_FEEDBACK_API_D3D12  12u
 
 struct npt_d3d11_fence_feedback_slot {
    _Atomic uint64_t completed_value;
@@ -509,6 +571,10 @@ struct npt_cmd_register_fence_feedback {
    /* header.object_id = guest fence id */
    uint32_t fb_res_id;
    uint32_t fb_offset;
+   /* NPT_FENCE_FEEDBACK_API_* -- selects the GetCompletedValue vtable
+    * the host poll calls. */
+   uint32_t fence_api;
+   uint32_t pad;
 };
 
 #endif /* NPT_TRANSPORT_DEFS_H */

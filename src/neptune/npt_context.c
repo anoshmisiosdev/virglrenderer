@@ -5,6 +5,7 @@
 
 #include "npt_context.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -17,6 +18,7 @@
 #include "npt_dispatch.h"
 #include "npt_event.h"
 #include "npt_feedback.h"
+#include "npt_heap12.h"
 #include "npt_overrides.h"
 #include "npt_profile.h"
 #include "npt_queue.h"
@@ -86,6 +88,12 @@ npt_context_free_resource(struct hash_entry *entry)
    npt_resource_free(entry->data);
 }
 
+void
+npt_context_free_detached_resource(struct npt_resource *res)
+{
+   npt_resource_free(res);
+}
+
 /* Overrides are set only where the default dispatcher cannot cope:
  * top-level functions (no _self for dlsym to bind against),
  * shared-HANDLE rejection, and feedback lifecycle hooks.  All other
@@ -111,6 +119,9 @@ npt_context_init_dispatch(struct npt_context *ctx)
    d->id3d12device_dispatch_overrides = &npt_id3d12device_overrides;
    d->id3d11devicecontext_dispatch_overrides = &npt_query_dc_overrides;
    d->id3d11devicecontext4_dispatch_overrides = &npt_fence_dc4_overrides;
+   d->id3d12commandqueue_dispatch_overrides =
+      &npt_id3d12commandqueue_overrides;
+   d->id3d12fence_dispatch_overrides = &npt_id3d12fence_overrides;
 }
 
 /* `id` is the guest-allocated handle; `host_ptr` is the host-library
@@ -289,6 +300,10 @@ npt_context_release_object(struct npt_context *ctx, uint64_t guest_id)
       return;
 
    npt_com_release(obj);
+
+   /* Only after the host library dropped the heap, and with it the
+    * import: releasing the pin can complete a deferred munmap. */
+   npt_heap12_on_release_object(ctx, guest_id);
 }
 
 HRESULT
@@ -390,6 +405,14 @@ npt_context_create(uint32_t ctx_id,
    if (!ctx->pending_blob_table)
       goto err_pending_blob_table;
 
+   if (mtx_init(&ctx->heap_import_mutex, mtx_plain) != thrd_success)
+      goto err_heap_import_mutex;
+
+   ctx->heap_import_table =
+      _mesa_hash_table_create(NULL, hash_uint64, equal_uint64);
+   if (!ctx->heap_import_table)
+      goto err_heap_import_table;
+
    if (mtx_init(&ctx->sync_queues_mutex, mtx_plain) != thrd_success)
       goto err_sync_queues_mutex;
 
@@ -432,6 +455,10 @@ err_object_mutex:
 err_event:
    mtx_destroy(&ctx->sync_queues_mutex);
 err_sync_queues_mutex:
+   _mesa_hash_table_destroy(ctx->heap_import_table, NULL);
+err_heap_import_table:
+   mtx_destroy(&ctx->heap_import_mutex);
+err_heap_import_mutex:
    _mesa_hash_table_destroy(ctx->pending_blob_table, NULL);
 err_pending_blob_table:
    mtx_destroy(&ctx->pending_blob_mutex);
@@ -475,6 +502,9 @@ npt_context_destroy(struct npt_context *ctx)
    }
    mtx_destroy(&ctx->sync_queues_mutex);
 
+   /* Retire fences still parked awaiting their ARM before the event
+    * state (and its lists) go away, so guest waiters unblock. */
+   npt_event_drain_parked_fences(ctx);
    npt_event_fini(ctx);
 
    /* Guests are expected to release every COM object before context
@@ -489,6 +519,12 @@ npt_context_destroy(struct npt_context *ctx)
 
    npt_cs_decoder_fini(&ctx->decoder);
    npt_cs_encoder_fini(&ctx->encoder);
+
+   /* Before the resource table goes away, so a zombie held up only by
+    * the import table is not freed twice. */
+   npt_heap12_context_fini(ctx);
+   _mesa_hash_table_destroy(ctx->heap_import_table, NULL);
+   mtx_destroy(&ctx->heap_import_mutex);
 
    _mesa_hash_table_destroy(ctx->resource_table, npt_context_free_resource);
    mtx_destroy(&ctx->resource_mutex);
@@ -795,7 +831,6 @@ npt_context_submit_cmd(struct npt_context *ctx, const void *buffer, size_t size)
 
 bool
 npt_context_submit_fence(struct npt_context *ctx,
-                         uint32_t flags,
                          uint32_t ring_idx,
                          uint64_t fence_id)
 {
@@ -817,6 +852,36 @@ npt_context_submit_fence(struct npt_context *ctx,
       return true;
    }
 
+   /* Event rings: the wait source comes from a pending ARM_EVENT_FENCE.
+    * Fence and ARM travel on independent channels, so either may arrive
+    * first; pop the ARM or park the fence atomically.  Retiring on a
+    * miss is not an option -- it completes the guest's fence wait before
+    * the GPU work has run. */
+   struct npt_event_paired paired;
+   int sync_fd = npt_event_pop_arm_or_park_fence(ctx, ring_idx, fence_id,
+                                                 &paired);
+   if (sync_fd == NPT_EVENT_FENCE_PARKED)
+      return true;
+   if (sync_fd < 0) {
+      /* Allocation failure: retiring early is still wrong, but wedging
+       * the guest is worse.  Loud. */
+      npt_log("submit_fence: PARK FAILED (ring=%u id=%" PRIu64 ") -- "
+              "retiring EARLY", ring_idx, fence_id);
+      ctx->retire_fence(ctx->ctx_id, ring_idx, fence_id);
+      return true;
+   }
+
+   return npt_context_pair_event_fence(ctx, ring_idx, fence_id,
+                                       &paired, /*register_fd=*/true);
+}
+
+bool
+npt_context_pair_event_fence(struct npt_context *ctx,
+                             uint32_t ring_idx, uint64_t fence_id,
+                             const struct npt_event_paired *paired,
+                             bool register_fd)
+{
+   int sync_fd = paired->fd;
    /* No vkGetDeviceQueue2 equivalent: create the sync queue on
     * first use for a given ring_idx. */
    mtx_lock(&ctx->sync_queues_mutex);
@@ -825,24 +890,19 @@ npt_context_submit_fence(struct npt_context *ctx,
       queue = npt_queue_create(ctx, ring_idx);
       if (!queue) {
          mtx_unlock(&ctx->sync_queues_mutex);
-         npt_log("submit_fence: failed to create sync queue for ring_idx %u",
-                 ring_idx);
-         return false;
+         npt_log("pair_event_fence: failed to create sync queue for "
+                 "ring_idx %u", ring_idx);
+         close(sync_fd);
+         if (paired->release_token)
+            npt_event_release(ctx, paired->release_token);
+         if (paired->check_fence)
+            npt_d3d12_gate_release(paired->check_fence);
+         ctx->retire_fence(ctx->ctx_id, ring_idx, fence_id);
+         return true;
       }
       ctx->sync_queues[ring_idx] = queue;
    }
    mtx_unlock(&ctx->sync_queues_mutex);
-
-   /* Event rings: a pending ARM_EVENT_FENCE owes us the proxy
-    * eventfd to wait on. */
-   int sync_fd = npt_event_pop_pending_arm(ctx, ring_idx, fence_id);
-
-   /* No fd owed: pending_arm missed (rare race) or the context is
-    * tearing down. */
-   if (sync_fd < 0) {
-      ctx->retire_fence(ctx->ctx_id, ring_idx, fence_id);
-      return true;
-   }
 
    /* Register so render_context_dispatch_submit_fence can retrieve it
     * via virgl_renderer_get_fence_fd and pass it via SCM_RIGHTS to
@@ -852,14 +912,34 @@ npt_context_submit_fence(struct npt_context *ctx,
     * Key by the fence's (ring_idx, fence_id) identity: the guest's
     * seqno is per-ring and repeats across the event rings, so the
     * render-server table keys by the full pair, matching the lookup in
-    * render_context_dispatch_submit_fence. */
-   int err = virgl_fence_set_fd(virgl_fence_ring_key(ring_idx, fence_id),
-                                sync_fd);
-   if (err)
-      npt_log("submit_fence: virgl_fence_set_fd(ring=%u, id=%" PRIu64 ") "
-              "failed (err=%d)", ring_idx, fence_id, err);
+    * render_context_dispatch_submit_fence.
+    *
+    * Only on the synchronous submit path: virgl_fence_take_fd runs
+    * right after we return, making the entry a one-shot hand-off.  A
+    * parked fence's consumer replied long ago with has_fd=0, so an entry
+    * registered for it strands -- and virgl_fence_set_fd sweeps every
+    * live entry with a syscall on each call, so strands make every later
+    * arm more expensive for the rest of the run.  Retirement rides the
+    * retire_fence message, not this fd. */
+   if (register_fd) {
+      int err = virgl_fence_set_fd(virgl_fence_ring_key(ring_idx, fence_id),
+                                   sync_fd);
+      if (err)
+         npt_log("pair_event_fence: virgl_fence_set_fd(ring=%u, id=%" PRIu64
+                 ") failed (err=%d)", ring_idx, fence_id, err);
+   }
 
-   return npt_queue_sync_submit(queue, flags, ring_idx, fence_id, sync_fd);
+   if (!npt_queue_sync_submit(queue, ring_idx, fence_id, paired)) {
+      /* The submit released the paired wait source, so nothing is left
+       * that could ever retire this fence.  Retiring early is wrong;
+       * leaving the guest's wait outstanding for good is worse. */
+      npt_log("pair_event_fence: sync submit failed (ring=%u id=%" PRIu64
+              ") -- retiring EARLY", ring_idx, fence_id);
+      ctx->retire_fence(ctx->ctx_id, ring_idx, fence_id);
+      return false;
+   }
+
+   return true;
 }
 
 bool
@@ -893,13 +973,31 @@ npt_context_create_resource(struct npt_context *ctx,
       res->fd_type = VIRGL_RESOURCE_FD_SHM;
       res->size = blob_size;
       res->u.data = data;
-      res->u.fd = -1; /* fd ownership leaves via out_blob */
+
+#ifdef __linux__
+      /* Seal against shrink so the memfd can back a udmabuf for a D3D12
+       * heap import.  Failure is not fatal: UDMABUF_CREATE then fails
+       * cleanly and the guest degrades to the sync-map path. */
+      if (fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK) < 0)
+         npt_log("create_resource: F_ADD_SEALS(F_SEAL_SHRINK) on res %u "
+                 "failed (errno %d); heap imports will fall back",
+                 res_id, errno);
+#endif
+
+      /* Ownership of the original fd leaves via out_blob, so keep a dup
+       * for a later heap import to wrap. */
+      res->u.fd = dup(fd);
+      if (res->u.fd < 0)
+         npt_log("create_resource: dup(fd) for res %u failed (errno %d); "
+                 "heap imports will fall back", res_id, errno);
 
       mtx_lock(&ctx->resource_mutex);
       if (_mesa_hash_table_search(ctx->resource_table, &res->res_id)) {
          mtx_unlock(&ctx->resource_mutex);
          npt_log("create_resource: duplicate res_id %u", res_id);
          munmap(data, blob_size);
+         if (res->u.fd >= 0)
+            close(res->u.fd);
          close(fd);
          free(res);
          return false;
@@ -907,10 +1005,15 @@ npt_context_create_resource(struct npt_context *ctx,
       _mesa_hash_table_insert(ctx->resource_table, &res->res_id, res);
       mtx_unlock(&ctx->resource_mutex);
 
+      /* CACHED, not WC: the host maps these pages write-back, so a WC
+       * guest mapping of the same physical pages would alias two
+       * incoherent cacheability attributes.  Persistently-mapped heaps
+       * also hand these pages straight to the app, where write-back is
+       * mandatory for read performance. */
       *out_blob = (struct virgl_context_blob){
          .type = VIRGL_RESOURCE_FD_SHM,
          .u.fd = fd,
-         .map_info = VIRGL_RENDERER_MAP_CACHE_WC,
+         .map_info = VIRGL_RENDERER_MAP_CACHE_CACHED,
       };
 
       return true;
@@ -1073,6 +1176,22 @@ npt_context_destroy_resource(struct npt_context *ctx, uint32_t res_id)
    list_for_each_entry_safe (struct npt_ring, ring, &doomed, head) {
       npt_ring_stop(ring);
       npt_ring_destroy(ring);
+   }
+
+   /* A live ID3D12Heap import still aliases this mapping, so munmapping
+    * it now is undefined under the host graphics driver.  Park the
+    * detached entry as a zombie for the last import to free. */
+   mtx_lock(&ctx->resource_mutex);
+   const uint32_t imports = res->heap_import_count;
+   if (imports > 0)
+      res->zombie = true;
+   mtx_unlock(&ctx->resource_mutex);
+
+   if (imports > 0) {
+      npt_log("destroy_resource: res %u still imported by %u D3D12 heap(s); "
+              "DEFERRING munmap until heap release (zombie)",
+              res_id, imports);
+      return;
    }
 
    npt_resource_free(res);

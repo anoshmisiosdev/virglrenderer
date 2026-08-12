@@ -19,6 +19,7 @@
 #include "npt_transport_defs.h"
 
 #include "neptune-protocol/npt_protocol_host_dispatch_types.h"
+#include "neptune-protocol/npt_protocol_host_id3d12resource.h"
 
 void
 npt_resource_update(struct npt_context *ctx,
@@ -148,8 +149,8 @@ npt_resource_map(struct npt_context *ctx,
                  uint64_t context_id, uint64_t resource_id,
                  uint32_t subresource, uint32_t access_flags,
                  uint32_t api_map_flags, uint32_t shmem_res_id,
-                 UNUSED uint64_t read_range_begin,
-                 UNUSED uint64_t read_range_end,
+                 uint64_t read_range_begin,
+                 uint64_t read_range_end,
                  uint64_t byte_size,
                  uint32_t mip_height, uint32_t mip_depth,
                  uint32_t shmem_offset,
@@ -181,35 +182,56 @@ npt_resource_map(struct npt_context *ctx,
       return NPT_E_FAIL;
    }
 
-   if (!context_id) {
-      /* TODO: D3D12: call ID3D12Resource::Map(subresource, pReadRange, &pData)
-       *               using read_range_{begin,end}. */
-      npt_log("map_resource: D3D12 path not implemented");
-      return NPT_E_FAIL;
-   }
-
-   void *imm_ctx = npt_context_lookup_object(ctx, NULL, context_id,
-                                             NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
-   if (!imm_ctx) {
-      npt_log("map_resource: NULL immediate context");
-      return NPT_E_FAIL;
-   }
-
-   D3D11_MAP d3d11_map_type = npt_access_flags_to_d3d11_map(access_flags);
-
-   /* May block on GPU sync; the guest's spin on the ring head
-    * propagates the stall. */
-   PFN_ID3D11DeviceContext_Map map_fn =
-      NPT_COM_VTBL_FUNC(PFN_ID3D11DeviceContext_Map,
-                        npt_com_vtable(imm_ctx),
-                        NPT_VTBL_ID3D11DeviceContext_Map);
    D3D11_MAPPED_SUBRESOURCE mapped;
    memset(&mapped, 0, sizeof(mapped));
-   HRESULT hr = map_fn(imm_ctx, resource, subresource,
-                       d3d11_map_type, api_map_flags, &mapped);
+   HRESULT hr;
 
-   if (NPT_FAILED(hr))
-      return hr;
+   if (!context_id) {
+      /* RowPitch/DepthPitch stay 0: this path serves buffers, and the
+       * guest computes texture layouts via GetCopyableFootprints. */
+      D3D12_RANGE read_range;
+      const D3D12_RANGE *rr = NULL;
+      if (read_range_begin != NPT_MAP_RANGE_NULL) {
+         read_range.Begin = (SIZE_T)read_range_begin;
+         read_range.End = (SIZE_T)read_range_end;
+         rr = &read_range;
+      }
+
+      void *pData = NULL;
+      PFN_ID3D12Resource_Map map12 =
+         NPT_COM_VTBL_FUNC(PFN_ID3D12Resource_Map,
+                           npt_com_vtable(resource),
+                           NPT_VTBL_ID3D12Resource_Map);
+      hr = map12(resource, subresource, rr, &pData);
+      if (NPT_FAILED(hr))
+         return hr;
+      if (!pData) {
+         npt_log("map_resource: D3D12 Map returned NULL data");
+         return NPT_E_FAIL;
+      }
+      mapped.pData = pData;
+   } else {
+      void *imm_ctx = npt_context_lookup_object(ctx, NULL, context_id,
+                                                NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
+      if (!imm_ctx) {
+         npt_log("map_resource: NULL immediate context");
+         return NPT_E_FAIL;
+      }
+
+      D3D11_MAP d3d11_map_type = npt_access_flags_to_d3d11_map(access_flags);
+
+      /* May block on GPU sync; the guest's spin on the ring head
+       * propagates the stall. */
+      PFN_ID3D11DeviceContext_Map map_fn =
+         NPT_COM_VTBL_FUNC(PFN_ID3D11DeviceContext_Map,
+                           npt_com_vtable(imm_ctx),
+                           NPT_VTBL_ID3D11DeviceContext_Map);
+      hr = map_fn(imm_ctx, resource, subresource,
+                  d3d11_map_type, api_map_flags, &mapped);
+
+      if (NPT_FAILED(hr))
+         return hr;
+   }
 
    /* Memcpy bound for READ (and matching WRITE on the Unmap path):
     *   1. (mip_height, mip_depth) for textures — tightest, required
@@ -269,8 +291,8 @@ npt_resource_unmap(struct npt_context *ctx,
                    uint32_t subresource, uint32_t shmem_res_id,
                    uint32_t shmem_offset, uint64_t byte_size,
                    uint32_t access_flags,
-                   UNUSED uint64_t written_range_begin,
-                   UNUSED uint64_t written_range_end)
+                   uint64_t written_range_begin,
+                   uint64_t written_range_end)
 {
    void *resource = npt_context_lookup_object(ctx, NULL, resource_id,
                                               NPT_OBJECT_TYPE_IUNKNOWN);
@@ -371,9 +393,21 @@ npt_resource_unmap(struct npt_context *ctx,
    }
 
    if (!context_id) {
-      /* TODO: D3D12: call ID3D12Resource::Unmap(subresource, pWrittenRange) */
-      npt_log("unmap_resource: D3D12 path not implemented");
-      return NPT_E_FAIL;
+      D3D12_RANGE written_range;
+      const D3D12_RANGE *wr = NULL;
+      if (written_range_begin != NPT_MAP_RANGE_NULL) {
+         written_range.Begin = (SIZE_T)written_range_begin;
+         written_range.End = (SIZE_T)written_range_end;
+         wr = &written_range;
+      }
+      PFN_ID3D12Resource_Unmap unmap12 =
+         NPT_COM_VTBL_FUNC(PFN_ID3D12Resource_Unmap,
+                           npt_com_vtable(resource),
+                           NPT_VTBL_ID3D12Resource_Unmap);
+      unmap12(resource, subresource, wr);
+
+      npt_sync_map_remove(ctx, entry);
+      return NPT_S_OK;
    }
 
    void *imm_ctx = npt_context_lookup_object(ctx, NULL, context_id,
