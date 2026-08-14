@@ -1398,8 +1398,12 @@ typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_ID3D12Fence_Signal)(void *, UINT64);
 typedef D3D12_FENCE_FLAGS (NPT_STDMETHODCALLTYPE *PFN_ID3D12Fence1_GetCreationFlags)(void *);
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_ID3D12PipelineState_GetCachedBlob)(void *, ID3DBlob **);
 typedef D3D12_DESCRIPTOR_HEAP_DESC (NPT_STDMETHODCALLTYPE *PFN_ID3D12DescriptorHeap_GetDesc)(void *);
-typedef D3D12_CPU_DESCRIPTOR_HANDLE (NPT_STDMETHODCALLTYPE *PFN_ID3D12DescriptorHeap_GetCPUDescriptorHandleForHeapStart)(void *);
-typedef D3D12_GPU_DESCRIPTOR_HANDLE (NPT_STDMETHODCALLTYPE *PFN_ID3D12DescriptorHeap_GetGPUDescriptorHandleForHeapStart)(void *);
+/* D3D12's real vtable ABI returns small (<=8 byte) aggregates via a
+ * hidden out-pointer, not in a register -- these two are the WIDL
+ * WIDL_EXPLICIT_AGGREGATE_RETURNS case, confirmed against
+ * vkd3d_d3d12.h's own non-inline vtable member declarations. */
+typedef D3D12_CPU_DESCRIPTOR_HANDLE * (NPT_STDMETHODCALLTYPE *PFN_ID3D12DescriptorHeap_GetCPUDescriptorHandleForHeapStart)(void *, D3D12_CPU_DESCRIPTOR_HANDLE *);
+typedef D3D12_GPU_DESCRIPTOR_HANDLE * (NPT_STDMETHODCALLTYPE *PFN_ID3D12DescriptorHeap_GetGPUDescriptorHandleForHeapStart)(void *, D3D12_GPU_DESCRIPTOR_HANDLE *);
 typedef D3D12_COMMAND_LIST_TYPE (NPT_STDMETHODCALLTYPE *PFN_ID3D12CommandList_GetType)(void *);
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_ID3D12GraphicsCommandList_Close)(void *);
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_ID3D12GraphicsCommandList_Reset)(void *, ID3D12CommandAllocator *, ID3D12PipelineState *);

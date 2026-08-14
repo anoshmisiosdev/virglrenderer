@@ -165,7 +165,8 @@ npt_dispatch_ID3D12DescriptorHeap_GetCPUDescriptorHandleForHeapStart(struct npt_
     if (ctx->id3d12descriptorheap_dispatch_overrides && ctx->id3d12descriptorheap_dispatch_overrides->GetCPUDescriptorHandleForHeapStart) {
         args.ret = ctx->id3d12descriptorheap_dispatch_overrides->GetCPUDescriptorHandleForHeapStart(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* Real vtable ABI: hidden out-pointer, not register return. */
+        _original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
@@ -249,7 +250,8 @@ npt_dispatch_ID3D12DescriptorHeap_GetGPUDescriptorHandleForHeapStart(struct npt_
     if (ctx->id3d12descriptorheap_dispatch_overrides && ctx->id3d12descriptorheap_dispatch_overrides->GetGPUDescriptorHandleForHeapStart) {
         args.ret = ctx->id3d12descriptorheap_dispatch_overrides->GetGPUDescriptorHandleForHeapStart(ctx, &args, _original);
     } else {
-        args.ret = _original(args._self);
+        /* Real vtable ABI: hidden out-pointer, not register return. */
+        _original(args._self, &args.ret);
     }
 
     /* Register any output COM handles in the context object table so
