@@ -48,6 +48,14 @@ struct npt_d3d_library {
    PFN_CreateDXGIFactory1 pfn_CreateDXGIFactory1;
 
    PFN_D3D12CreateDevice pfn_D3D12CreateDevice;
+   /* Root-signature helpers. libvkd3d-proton-d3d12.so exports all four
+    * (confirmed with nm -D); without these the corresponding overrides
+    * can only return E_NOTIMPL. Optional: a backend lacking any of them
+    * simply leaves that slot NULL and the override degrades as before. */
+   PFN_D3D12SerializeRootSignature pfn_D3D12SerializeRootSignature;
+   PFN_D3D12SerializeVersionedRootSignature pfn_D3D12SerializeVersionedRootSignature;
+   PFN_D3D12CreateRootSignatureDeserializer pfn_D3D12CreateRootSignatureDeserializer;
+   PFN_D3D12CreateVersionedRootSignatureDeserializer pfn_D3D12CreateVersionedRootSignatureDeserializer;
 
    /* Darwin embedder event API, dlsym'd from the backend umbrella
     * (d3dmetal exports dmn_event_*, dxmt exports dxmt_event_*).  NULL off

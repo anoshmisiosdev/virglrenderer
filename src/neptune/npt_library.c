@@ -185,6 +185,28 @@ npt_library_init(struct npt_d3d_library *lib)
       }
    }
 
+   /* Optional root-signature helpers: unlike D3D12CreateDevice these are
+    * not fatal if absent -- the overrides fall back to E_NOTIMPL. */
+   if (lib->d3d12_module) {
+      lib->pfn_D3D12SerializeRootSignature =
+         ((union { void *p; PFN_D3D12SerializeRootSignature f; }){
+            .p = npt_library_sym(lib->d3d12_module, "D3D12SerializeRootSignature")
+         }).f;
+      lib->pfn_D3D12SerializeVersionedRootSignature =
+         ((union { void *p; PFN_D3D12SerializeVersionedRootSignature f; }){
+            .p = npt_library_sym(lib->d3d12_module, "D3D12SerializeVersionedRootSignature")
+         }).f;
+      lib->pfn_D3D12CreateRootSignatureDeserializer =
+         ((union { void *p; PFN_D3D12CreateRootSignatureDeserializer f; }){
+            .p = npt_library_sym(lib->d3d12_module, "D3D12CreateRootSignatureDeserializer")
+         }).f;
+      lib->pfn_D3D12CreateVersionedRootSignatureDeserializer =
+         ((union { void *p; PFN_D3D12CreateVersionedRootSignatureDeserializer f; }){
+            .p = npt_library_sym(lib->d3d12_module,
+                                 "D3D12CreateVersionedRootSignatureDeserializer")
+         }).f;
+   }
+
    if (lib->d3d11_module) {
       const char *p = getenv("NPT_D3D11_LIBRARY_PATH");
       npt_log("loaded D3D11 library: %s", p ? p : NPT_D3D11_LIBRARY_DEFAULT);

@@ -138,9 +138,17 @@ npt_override_D3D12CreateRootSignatureDeserializer(
    UNUSED struct npt_dispatch_context *dctx,
    struct npt_command_D3D12CreateRootSignatureDeserializer *args)
 {
-   args->ret = NPT_E_NOTIMPL;
-   if (args->ppRootSignatureDeserializer)
-      *args->ppRootSignatureDeserializer = NULL;
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   if (!lib || !lib->pfn_D3D12CreateRootSignatureDeserializer) {
+      args->ret = NPT_E_NOTIMPL;
+      if (args->ppRootSignatureDeserializer)
+         *args->ppRootSignatureDeserializer = NULL;
+      return args->ret;
+   }
+   args->ret = lib->pfn_D3D12CreateRootSignatureDeserializer(
+      args->pSrcData, args->SrcDataSizeInBytes,
+      args->pRootSignatureDeserializerInterface,
+      args->ppRootSignatureDeserializer);
    return args->ret;
 }
 
@@ -149,9 +157,17 @@ npt_override_D3D12CreateVersionedRootSignatureDeserializer(
    UNUSED struct npt_dispatch_context *dctx,
    struct npt_command_D3D12CreateVersionedRootSignatureDeserializer *args)
 {
-   args->ret = NPT_E_NOTIMPL;
-   if (args->ppRootSignatureDeserializer)
-      *args->ppRootSignatureDeserializer = NULL;
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   if (!lib || !lib->pfn_D3D12CreateVersionedRootSignatureDeserializer) {
+      args->ret = NPT_E_NOTIMPL;
+      if (args->ppRootSignatureDeserializer)
+         *args->ppRootSignatureDeserializer = NULL;
+      return args->ret;
+   }
+   args->ret = lib->pfn_D3D12CreateVersionedRootSignatureDeserializer(
+      args->pSrcData, args->SrcDataSizeInBytes,
+      args->pRootSignatureDeserializerInterface,
+      args->ppRootSignatureDeserializer);
    return args->ret;
 }
 
@@ -160,9 +176,17 @@ npt_override_D3D12SerializeRootSignature(
    UNUSED struct npt_dispatch_context *dctx,
    struct npt_command_D3D12SerializeRootSignature *args)
 {
-   args->ret = NPT_E_NOTIMPL;
-   if (args->ppBlob) *args->ppBlob = NULL;
-   if (args->ppErrorBlob) *args->ppErrorBlob = NULL;
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   if (!lib || !lib->pfn_D3D12SerializeRootSignature) {
+      args->ret = NPT_E_NOTIMPL;
+      if (args->ppBlob) *args->ppBlob = NULL;
+      if (args->ppErrorBlob) *args->ppErrorBlob = NULL;
+      return args->ret;
+   }
+   args->ret = lib->pfn_D3D12SerializeRootSignature(args->pRootSignature,
+                                                    args->Version,
+                                                    args->ppBlob,
+                                                    args->ppErrorBlob);
    return args->ret;
 }
 
@@ -171,9 +195,15 @@ npt_override_D3D12SerializeVersionedRootSignature(
    UNUSED struct npt_dispatch_context *dctx,
    struct npt_command_D3D12SerializeVersionedRootSignature *args)
 {
-   args->ret = NPT_E_NOTIMPL;
-   if (args->ppBlob) *args->ppBlob = NULL;
-   if (args->ppErrorBlob) *args->ppErrorBlob = NULL;
+   struct npt_d3d_library *lib = npt_renderer_get_library();
+   if (!lib || !lib->pfn_D3D12SerializeVersionedRootSignature) {
+      args->ret = NPT_E_NOTIMPL;
+      if (args->ppBlob) *args->ppBlob = NULL;
+      if (args->ppErrorBlob) *args->ppErrorBlob = NULL;
+      return args->ret;
+   }
+   args->ret = lib->pfn_D3D12SerializeVersionedRootSignature(
+      args->pRootSignature, args->ppBlob, args->ppErrorBlob);
    return args->ret;
 }
 
