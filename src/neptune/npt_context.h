@@ -24,6 +24,7 @@ struct npt_pending_blob {
    enum virgl_resource_fd_type fd_type;
    int fd;
    uint64_t size;
+   uint64_t modifier;
 };
 
 /* Sync Map/Unmap bookkeeping.  Keyed by (resource_id, subresource):
@@ -232,7 +233,8 @@ npt_context_register_pending_blob(struct npt_context *ctx,
                                   uint64_t blob_id,
                                   enum virgl_resource_fd_type fd_type,
                                   int fd,
-                                  uint64_t size);
+                                  uint64_t size,
+                                  uint64_t modifier);
 
 /* Wake any wait_ring waiter on \p ring_id whose target seqno is
  * reached.  Called after each dispatched command. */

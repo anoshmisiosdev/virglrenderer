@@ -429,6 +429,7 @@ proxy_context_get_blob(struct virgl_context *base,
    blob->type = reply.fd_type;
    blob->u.fd = reply_fd;
    blob->map_info = reply.map_info;
+   blob->modifier = reply.modifier;
 
    if (reply.fd_type == VIRGL_RESOURCE_FD_OPAQUE)
       blob->vulkan_info = reply.vulkan_info;

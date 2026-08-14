@@ -48,6 +48,11 @@ struct virgl_context_blob {
 
    uint32_t map_info;
 
+   /* DRM format modifier of the exported dmabuf, or DRM_FORMAT_MOD_INVALID
+    * when the backend does not know it.  Needed by the client (QEMU) to
+    * import the dmabuf correctly; guessing it renders garbage. */
+   uint64_t modifier;
+
    struct virgl_resource_vulkan_info vulkan_info;
 };
 

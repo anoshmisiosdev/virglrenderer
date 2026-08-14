@@ -179,7 +179,8 @@ npt_renderer_create_resource(uint32_t ctx_id,
                              uint32_t blob_flags,
                              enum virgl_resource_fd_type *out_fd_type,
                              int *out_res_fd,
-                             uint32_t *out_map_info)
+                             uint32_t *out_map_info,
+                             uint64_t *out_modifier)
 {
    struct npt_context *ctx = npt_renderer_lookup_context(ctx_id);
    if (!ctx)
@@ -192,6 +193,7 @@ npt_renderer_create_resource(uint32_t ctx_id,
    *out_fd_type = blob.type;
    *out_res_fd = blob.u.fd;
    *out_map_info = blob.map_info;
+   *out_modifier = blob.modifier;
 
    return true;
 }

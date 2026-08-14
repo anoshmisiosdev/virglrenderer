@@ -211,6 +211,12 @@ int vrend_winsys_get_attrs_for_texture(uint32_t tex_id, uint32_t format, int *fo
                                        int *planes, uint64_t *modifier)
 {
 #ifdef ENABLE_GBM
+   /* NPTNOTE: extending this to CONTEXT_EGL_EXTERNAL (as every other EGL site
+    * in this file does) is the obvious-looking fix for QEMU seeing
+    * has_export=0/modifiers=0 under egl-headless -- but it KILLS the
+    * virgl_render_server worker (SIGKILL, blob create -> 0x1200), so
+    * virgl_egl_get_attrs_for_texture() is evidently not safe on an external
+    * EGL display (no GBM device of its own).  Left as-is deliberately. */
    if (use_context == CONTEXT_EGL)
       return virgl_egl_get_attrs_for_texture(egl, tex_id, format, fourcc,
                                              has_dmabuf_export,

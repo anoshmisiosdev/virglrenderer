@@ -344,11 +344,15 @@ render_state_create_resource(uint32_t ctx_id,
                              enum virgl_resource_fd_type *out_fd_type,
                              int *out_res_fd,
                              uint32_t *out_map_info,
-                             struct virgl_resource_vulkan_info *out_vulkan_info)
+                             struct virgl_resource_vulkan_info *out_vulkan_info,
+                             uint64_t *out_modifier)
 {
    struct render_context *ctx = render_state_lookup_context(ctx_id);
    if (!ctx)
       return false;
+
+   /* Only the neptune backend reports a dmabuf modifier today. */
+   *out_modifier = DRM_FORMAT_MOD_INVALID;
 
    SCOPE_LOCK_RENDERER();
    switch (ctx->backend) {
@@ -362,7 +366,7 @@ render_state_create_resource(uint32_t ctx_id,
    case RENDER_BACKEND_NEPTUNE:
       return npt_renderer_create_resource(ctx_id, res_id, blob_id, blob_size,
                                           blob_flags, out_fd_type, out_res_fd,
-                                          out_map_info);
+                                          out_map_info, out_modifier);
 #endif
    default:
       return false;

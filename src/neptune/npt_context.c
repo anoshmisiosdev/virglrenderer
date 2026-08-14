@@ -893,6 +893,7 @@ npt_context_create_resource(struct npt_context *ctx,
          .type = VIRGL_RESOURCE_FD_SHM,
          .u.fd = fd,
          .map_info = VIRGL_RENDERER_MAP_CACHE_WC,
+         .modifier = DRM_FORMAT_MOD_INVALID,
       };
 
       return true;
@@ -926,6 +927,7 @@ npt_context_create_resource(struct npt_context *ctx,
          .type = pb->fd_type,
          .u.fd = pb->fd,
          .map_info = 0,
+         .modifier = pb->modifier,
       };
       free(pb);
 
@@ -938,7 +940,8 @@ npt_context_register_pending_blob(struct npt_context *ctx,
                                   uint64_t blob_id,
                                   enum virgl_resource_fd_type fd_type,
                                   int fd,
-                                  uint64_t size)
+                                  uint64_t size,
+                                  uint64_t modifier)
 {
    struct npt_pending_blob *pb = calloc(1, sizeof(*pb));
    if (!pb)
@@ -948,6 +951,7 @@ npt_context_register_pending_blob(struct npt_context *ctx,
    pb->fd_type = fd_type;
    pb->fd = fd;
    pb->size = size;
+   pb->modifier = modifier;
 
    mtx_lock(&ctx->pending_blob_mutex);
    _mesa_hash_table_insert(ctx->pending_blob_table, &pb->blob_id, pb);

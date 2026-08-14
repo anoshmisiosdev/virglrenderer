@@ -549,7 +549,13 @@ int virgl_renderer_resource_get_info(int res_handle,
    if ((ret = virgl_renderer_resource_get_info_common(res_handle, info, NULL, NULL)) != 0)
        return ret;
 
-   if (state.winsys_initialized) {
+   /* NPTPATCH: also honour an externally-supplied winsys.  QEMU's egl-headless
+    * display hands its own EGL display over through the get_egl_display
+    * callback, which routes to vrend_winsys_init_external() and sets only
+    * external_winsys_initialized.  Guarding on winsys_initialized alone made
+    * this return success without ever filling drm_fourcc.  The surfaceless
+    * context helpers further down already accept either winsys. */
+   if (state.winsys_initialized || state.external_winsys_initialized) {
       return vrend_winsys_get_attrs_for_texture(info->tex_id,
                                                 info->virgl_format,
                                                 &info->drm_fourcc,
@@ -575,7 +581,28 @@ int virgl_renderer_resource_get_info_ext(int res_handle,
 
    info_ext->version = VIRGL_RENDERER_RESOURCE_INFO_EXT_VERSION;
 
-   if (state.winsys_initialized) {
+   /* NPTPATCH: a render-server-backed resource has no local GL texture, so
+    * vrend_winsys_get_attrs_for_texture() below can tell us nothing about it.
+    * The exporting process does know the modifier (it comes from DXVK's
+    * shared-texture descriptor) and now sends it across with the dmabuf, so
+    * report that instead of leaving the client to guess -- guessing a
+    * plausible-but-wrong modifier renders garbage rather than failing. */
+   {
+      struct virgl_resource *mres = virgl_resource_lookup(res_handle);
+      if (mres && mres->modifier != DRM_FORMAT_MOD_INVALID &&
+          mres->fd_type == VIRGL_RESOURCE_FD_DMABUF) {
+         info_ext->has_dmabuf_export = true;
+         info_ext->planes = 1;
+         info_ext->modifiers = mres->modifier;
+         return 0;
+      }
+   }
+
+   /* NPTPATCH: see virgl_renderer_resource_get_info() above.  Without this,
+    * every scanout-blob query under egl-headless returned ret=0 with
+    * has_dmabuf_export=0/planes=0/modifiers=0, so QEMU published
+    * DRM_FORMAT_MOD_INVALID and imported the scanout with no modifier. */
+   if (state.winsys_initialized || state.external_winsys_initialized) {
       return vrend_winsys_get_attrs_for_texture(info_ext->base.tex_id,
                                                 info_ext->base.virgl_format,
                                                 &info_ext->base.drm_fourcc,
@@ -1258,6 +1285,7 @@ int virgl_renderer_resource_create_blob(const struct virgl_renderer_resource_cre
    }
 
    res->map_info = blob.map_info;
+   res->modifier = blob.modifier;
    res->map_size = args->size;
 
    return 0;

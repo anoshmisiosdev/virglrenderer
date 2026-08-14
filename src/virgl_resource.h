@@ -28,6 +28,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Same value as vrend_winsys.h / libdrm; defined here so the header is
+ * self-contained for users that do not pull in the winsys layer. */
+#ifndef DRM_FORMAT_MOD_INVALID
+#define DRM_FORMAT_MOD_INVALID 0x00ffffffffffffffULL
+#endif
+
 struct iovec;
 struct pipe_resource;
 struct virgl_context;
@@ -98,6 +104,9 @@ struct virgl_resource {
    int iov_count;
 
    uint32_t map_info;
+
+   /* DRM format modifier of fd, or DRM_FORMAT_MOD_INVALID if unknown. */
+   uint64_t modifier;
 
    uint64_t map_size;
    void *mapped;

@@ -181,7 +181,7 @@ npt_shared_export_blob(struct npt_context *ctx, uint64_t texture_id,
    }
    if (!npt_context_register_pending_blob(ctx, blob_id,
                                           NPT_SHARED_FD_TYPE, fd,
-                                          export_size)) {
+                                          export_size, info.modifier)) {
       close(fd);
       return NPT_E_FAIL;
    }
