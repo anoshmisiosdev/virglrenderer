@@ -125,6 +125,7 @@ neptune_sources = [
    'neptune/npt_dispatch.c',
    'neptune/npt_overrides_toplevel.c',
    'neptune/npt_overrides_shared_handle.c',
+   'neptune/npt_overrides_id3d12device_checkfeaturesupport.c',
 ]
 
 drm_sources = [

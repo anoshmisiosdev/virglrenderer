@@ -22,6 +22,18 @@ extern struct npt_dispatch_id3d11device5_overrides npt_id3d11device5_overrides;
 extern struct npt_dispatch_id3d11fence_overrides npt_id3d11fence_overrides;
 extern struct npt_dispatch_id3d12device_overrides npt_id3d12device_overrides;
 
+/* CheckFeatureSupport: see
+ * npt_overrides_id3d12device_checkfeaturesupport.c for why this needs a
+ * hand-written override (D3D12_FEATURE_FEATURE_LEVELS's embedded guest
+ * pointer segfaults the generic blob-passthrough dispatch inside
+ * vkd3d-proton). Declared here, wired into npt_id3d12device_overrides's
+ * designated initializer in npt_overrides_shared_handle.c. */
+HRESULT
+npt_d3d12_device_CheckFeatureSupport_override(
+   struct npt_dispatch_context *ctx,
+   struct npt_command_ID3D12Device_CheckFeatureSupport *args,
+   PFN_ID3D12Device_CheckFeatureSupport original);
+
 /* Hooks Begin/End on the immediate context to maintain the per-query
  * pending list. */
 extern struct npt_dispatch_id3d11devicecontext_overrides

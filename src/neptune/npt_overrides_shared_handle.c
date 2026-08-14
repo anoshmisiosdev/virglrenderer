@@ -186,4 +186,9 @@ struct npt_dispatch_id3d12device_overrides npt_id3d12device_overrides = {
    .CreateSharedHandle = reject_ID3D12Device_CreateSharedHandle,
    .OpenSharedHandle = reject_ID3D12Device_OpenSharedHandle,
    .OpenSharedHandleByName = reject_ID3D12Device_OpenSharedHandleByName,
+   /* CheckFeatureSupport: unrelated to shared-HANDLE policy, but this
+    * designated initializer is the single point of truth for this
+    * global's contents. Implementation lives in
+    * npt_overrides_id3d12device_checkfeaturesupport.c. */
+   .CheckFeatureSupport = npt_d3d12_device_CheckFeatureSupport_override,
 };
