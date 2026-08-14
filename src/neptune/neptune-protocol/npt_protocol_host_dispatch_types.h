@@ -984,7 +984,9 @@ typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_IDXGIOutput6_CheckHardwareCompositio
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_IDXGIFactory6_EnumAdapterByGpuPreference)(void *, UINT, DXGI_GPU_PREFERENCE, const IID *, void **);
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_IDXGIFactory7_RegisterAdaptersChangedEvent)(void *, HANDLE, DWORD *);
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_IDXGIFactory7_UnregisterAdaptersChangedEvent)(void *, DWORD);
-typedef void (NPT_STDMETHODCALLTYPE *PFN_ID3D10Blob_GetBufferPointer)(void *);
+/* Returns LPVOID -- a real host pointer. Was declared `void`, which
+ * silently discarded it even when _original was called directly. */
+typedef void *(NPT_STDMETHODCALLTYPE *PFN_ID3D10Blob_GetBufferPointer)(void *);
 typedef SIZE_T (NPT_STDMETHODCALLTYPE *PFN_ID3D10Blob_GetBufferSize)(void *);
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_ID3DDestructionNotifier_RegisterDestructionCallback)(void *, PFN_DESTRUCTION_CALLBACK, void *, UINT *);
 typedef HRESULT (NPT_STDMETHODCALLTYPE *PFN_ID3DDestructionNotifier_UnregisterDestructionCallback)(void *, UINT);
@@ -2236,7 +2238,7 @@ struct npt_dispatch_idxgifactory7_overrides {
 };
 
 struct npt_dispatch_id3d10blob_overrides {
-    void (*GetBufferPointer)(struct npt_dispatch_context *ctx,
+    void *(*GetBufferPointer)(struct npt_dispatch_context *ctx,
                                         struct npt_command_ID3D10Blob_GetBufferPointer *args,
                                         PFN_ID3D10Blob_GetBufferPointer original);
     SIZE_T (*GetBufferSize)(struct npt_dispatch_context *ctx,

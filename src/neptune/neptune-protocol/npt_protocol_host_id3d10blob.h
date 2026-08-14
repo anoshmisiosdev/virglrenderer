@@ -19,10 +19,23 @@
 
 /*
  * ID3D10Blob::GetBufferPointer
+ *
+ * HAND-WRITTEN reply: the real ABI returns LPVOID, a host-process
+ * pointer meaningless to the guest, so the codegen'd version of this
+ * function correctly stubbed the call but never marshalled any bytes
+ * back. See npt_protocol_guest_id3d10blob.h for the full explanation
+ * and the matching guest-side rewrite. This dispatch now calls the
+ * real _original (its return type is fixed to `void *` in
+ * npt_protocol_host_dispatch_types.h -- it used to be declared `void`,
+ * silently discarding the real pointer even when _original was called
+ * directly), reads GetBufferSize bytes starting there, and encodes them
+ * into the reply with the same array_count + blob_array primitives
+ * D3D12_SHADER_BYTECODE uses guest->host, just mirrored here.
  */
 
 struct npt_command_ID3D10Blob_GetBufferPointer {
     void *_self;
+    void *ret;
 };
 
 static inline void
@@ -40,7 +53,8 @@ npt_replace_ID3D10Blob_GetBufferPointer_args_handle(struct npt_dispatch_context 
 
 static inline void
 npt_encode_ID3D10Blob_GetBufferPointer_reply(struct npt_cs_encoder *enc,
-                                             const struct npt_command_ID3D10Blob_GetBufferPointer *args)
+                                             const struct npt_command_ID3D10Blob_GetBufferPointer *args,
+                                             SIZE_T buf_size)
 {
     struct npt_reply_header _reply = {
         .cmd_type = NPT_CMD_TYPE(255, NPT_IFACE_ID_ID3D10Blob,
@@ -48,6 +62,12 @@ npt_encode_ID3D10Blob_GetBufferPointer_reply(struct npt_cs_encoder *enc,
         .cmd_return = 0,
     };
     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
+    if (args->ret && buf_size) {
+        npt_encode_array_count(enc, buf_size);
+        npt_encode_blob_array(enc, args->ret, buf_size);
+    } else {
+        npt_encode_array_count(enc, 0);
+    }
 }
 
 static inline void
@@ -72,15 +92,33 @@ npt_dispatch_ID3D10Blob_GetBufferPointer(struct npt_dispatch_context *ctx,
 
     npt_replace_ID3D10Blob_GetBufferPointer_args_handle(ctx, &args);
 
+    /* One or more non-_self object-typed arguments (direct params
+     * and/or embedded struct fields) may have failed to resolve via
+     * npt_cs_handle_lookup() above -- that failure already called
+     * npt_cs_decoder_set_fatal() internally, mirroring the _self
+     * check a few lines up.  Re-check here before touching _original
+     * or any override: proceeding would call the real driver with a
+     * NULL required pointer instead of cleanly aborting this command. */
+    if (npt_cs_decoder_get_fatal(ctx->decoder))
+        return;
+
     PFN_ID3D10Blob_GetBufferPointer _original = NPT_COM_VTBL_FUNC(
         PFN_ID3D10Blob_GetBufferPointer, npt_com_vtable(args._self),
         NPT_VTBL_ID3D10Blob_GetBufferPointer);
 
     if (ctx->id3d10blob_dispatch_overrides && ctx->id3d10blob_dispatch_overrides->GetBufferPointer) {
-        ctx->id3d10blob_dispatch_overrides->GetBufferPointer(ctx, &args, _original);
+        args.ret = ctx->id3d10blob_dispatch_overrides->GetBufferPointer(ctx, &args, _original);
     } else {
-        _original(args._self);
+        args.ret = _original(args._self);
     }
+
+    /* GetBufferSize is the same real interface's own accessor for the
+     * length of the buffer args.ret points at -- always safe/cheap to
+     * call again here regardless of override path. */
+    PFN_ID3D10Blob_GetBufferSize _original_size = NPT_COM_VTBL_FUNC(
+        PFN_ID3D10Blob_GetBufferSize, npt_com_vtable(args._self),
+        NPT_VTBL_ID3D10Blob_GetBufferSize);
+    SIZE_T buf_size = _original_size ? _original_size(args._self) : 0;
 
     /* Register any output COM handles in the context object table so
      * later commands that reference them can be validated.  The riid
@@ -90,7 +128,7 @@ npt_dispatch_ID3D10Blob_GetBufferPointer(struct npt_dispatch_context *ctx,
     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
             if (npt_cs_encoder_acquire(ctx->encoder)) {
-                npt_encode_ID3D10Blob_GetBufferPointer_reply(ctx->encoder, &args);
+                npt_encode_ID3D10Blob_GetBufferPointer_reply(ctx->encoder, &args, buf_size);
                 npt_cs_encoder_release(ctx->encoder);
             }
         }
@@ -155,6 +193,16 @@ npt_dispatch_ID3D10Blob_GetBufferSize(struct npt_dispatch_context *ctx,
     }
 
     npt_replace_ID3D10Blob_GetBufferSize_args_handle(ctx, &args);
+
+    /* One or more non-_self object-typed arguments (direct params
+     * and/or embedded struct fields) may have failed to resolve via
+     * npt_cs_handle_lookup() above -- that failure already called
+     * npt_cs_decoder_set_fatal() internally, mirroring the _self
+     * check a few lines up.  Re-check here before touching _original
+     * or any override: proceeding would call the real driver with a
+     * NULL required pointer instead of cleanly aborting this command. */
+    if (npt_cs_decoder_get_fatal(ctx->decoder))
+        return;
 
     PFN_ID3D10Blob_GetBufferSize _original = NPT_COM_VTBL_FUNC(
         PFN_ID3D10Blob_GetBufferSize, npt_com_vtable(args._self),
